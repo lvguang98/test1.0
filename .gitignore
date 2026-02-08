@@ -1,0 +1,63 @@
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temp files
+temp/
+tmp/
+*.tmp
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Excel临时文件
+~$*.xlsx
+~$*.xls
+
+# 配置文件（包含敏感信息）
+config.json
+secrets.json
+*.env
+
+# Word临时文件
+~$*.docx
+~$*.doc

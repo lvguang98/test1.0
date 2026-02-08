@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>782</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QGroupBox" name="groupBox">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>30</y>
+      <width>541</width>
+      <height>111</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>系统配置</string>
+    </property>
+    <widget class="QLabel" name="label">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>22</y>
+       <width>42</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>操作员:</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_operator">
+     <property name="geometry">
+      <rect>
+       <x>112</x>
+       <y>22</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="placeholderText">
+      <string>请输入操作员姓名</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_2">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>48</y>
+       <width>48</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>API地址:</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_api_url">
+     <property name="geometry">
+      <rect>
+       <x>112</x>
+       <y>48</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="placeholderText">
+      <string>http://api.example.com</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_3">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>74</y>
+       <width>48</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>API密钥:</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_api_key">
+     <property name="geometry">
+      <rect>
+       <x>112</x>
+       <y>74</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="echoMode">
+      <enum>QLineEdit::Password</enum>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_remember">
+     <property name="geometry">
+      <rect>
+       <x>290</x>
+       <y>50</y>
+       <width>101</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>记住我</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_2">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>140</y>
+      <width>551</width>
+      <height>521</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>职工基本信息</string>
+    </property>
+    <widget class="QLabel" name="label_5">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>110</y>
+       <width>54</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>受伤职工:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_6">
+     <property name="geometry">
+      <rect>
+       <x>40</x>
+       <y>160</y>
+       <width>30</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>姓名:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_7">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>160</y>
+       <width>30</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>年龄:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_8">
+     <property name="geometry">
+      <rect>
+       <x>350</x>
+       <y>160</y>
+       <width>30</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>性别:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_9">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>190</y>
+       <width>54</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>身份证号:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_10">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>230</y>
+       <width>66</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>身份证地址:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_11">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>280</y>
+       <width>42</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>现住址:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_12">
+     <property name="geometry">
+      <rect>
+       <x>40</x>
+       <y>310</y>
+       <width>30</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>电话:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_13">
+     <property name="geometry">
+      <rect>
+       <x>270</x>
+       <y>310</y>
+       <width>30</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>岗位:</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_injured_worker">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>110</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_name">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>149</y>
+       <width>133</width>
+       <height>31</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_age">
+     <property name="geometry">
+      <rect>
+       <x>290</x>
+       <y>160</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_id_card">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>190</y>
+       <width>301</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_id_address">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>230</y>
+       <width>341</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_current_address">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>280</y>
+       <width>341</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_phone">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>310</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_position">
+     <property name="geometry">
+      <rect>
+       <x>320</x>
+       <y>310</y>
+       <width>133</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_gender">
+     <property name="geometry">
+      <rect>
+       <x>390</x>
+       <y>160</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="currentText">
+      <string>男</string>
+     </property>
+     <item>
+      <property name="text">
+       <string>男</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>女</string>
+      </property>
+     </item>
+    </widget>
+    <widget class="QLabel" name="label_14">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>350</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>拟用条例：</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_regulations">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>350</y>
+       <width>301</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="maxVisibleItems">
+      <number>7</number>
+     </property>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第一项（普通工伤案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第二项（预备收尾案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第三项（暴力伤害案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第四项（患职业病案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第五项（因工外出案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十四条第一款第六项（上下班时案件）</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>第十五条第一款第一项（工作时因病亡故案件）</string>
+      </property>
+     </item>
+    </widget>
+    <widget class="QLabel" name="label_15">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>410</y>
+       <width>54</width>
+       <height>12</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>用人单位:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_16">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>450</y>
+       <width>54</width>
+       <height>12</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>用工单位:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_17">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>490</y>
+       <width>54</width>
+       <height>12</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>工作场所:</string>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_employer">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>400</y>
+       <width>291</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="editable">
+      <bool>true</bool>
+     </property>
+     <property name="insertPolicy">
+      <enum>QComboBox::NoInsert</enum>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_work_unit">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>440</y>
+       <width>291</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="editable">
+      <bool>true</bool>
+     </property>
+     <property name="insertPolicy">
+      <enum>QComboBox::NoInsert</enum>
+     </property>
+    </widget>
+    <widget class="QComboBox" name="comboBox_workplace">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>480</y>
+       <width>291</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="editable">
+      <bool>true</bool>
+     </property>
+     <property name="insertPolicy">
+      <enum>QComboBox::NoInsert</enum>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_personal">
+     <property name="geometry">
+      <rect>
+       <x>130</x>
+       <y>30</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>个人案件</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="checkBox_death">
+     <property name="geometry">
+      <rect>
+       <x>240</x>
+       <y>30</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>工亡案件</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_4">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>30</y>
+       <width>60</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>案件类型：</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btn_generate_record">
+     <property name="geometry">
+      <rect>
+       <x>280</x>
+       <y>110</y>
+       <width>151</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>生成笔录</string>
+     </property>
+    </widget>
+    <widget class="QGroupBox" name="groupBox_interview_type">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>50</y>
+       <width>401</width>
+       <height>51</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>询问类型</string>
+     </property>
+     <widget class="QRadioButton" name="radio_self">
+      <property name="geometry">
+       <rect>
+        <x>40</x>
+        <y>20</y>
+        <width>89</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>本人</string>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QRadioButton" name="radio_witness">
+      <property name="geometry">
+       <rect>
+        <x>140</x>
+        <y>20</y>
+        <width>89</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>证人</string>
+      </property>
+     </widget>
+     <widget class="QRadioButton" name="radio_legal_entity">
+      <property name="geometry">
+       <rect>
+        <x>230</x>
+        <y>20</y>
+        <width>89</width>
+        <height>16</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>法人</string>
+      </property>
+     </widget>
+    </widget>
+   </widget>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>800</width>
+     <height>23</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
