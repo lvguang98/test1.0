@@ -38,6 +38,31 @@ class MainWindow(QMainWindow):
         # 6. 根据记住状态更新界面
         self.update_ui()
 
+    def determine_word_template(self, person_type, case_type, regulation_key):
+        """根据条件确定Word模板文件路径"""
+
+        # 1. 检查是否是本人 + 普通案件（最简单的情况）
+        if person_type == "本人" and case_type == "普通案件":
+            # 先检查是否有对应的模板文件
+            template_path = "templates/本人普通案件模板.docx"
+            if os.path.exists(template_path):
+                return template_path
+            else:
+                # 如果文件不存在，创建一个简单的提示
+                self.statusBar().showMessage("模板文件不存在: " + template_path, 3000)
+                return None
+
+        # 2. 其他情况暂时返回默认模板
+        else:
+            # 可以在这里添加更多的模板判断逻辑
+            default_template = "templates/通用模板.docx"
+            if os.path.exists(default_template):
+                self.statusBar().showMessage(f"使用通用模板: {person_type}+{case_type}", 3000)
+                return default_template
+            else:
+                self.statusBar().showMessage("模板文件不存在，请检查templates目录", 3000)
+                return None
+
     def load_excel_to_combobox(self):
         """从Excel文件加载数据到ComboBox"""
         # 获取当前目录
@@ -184,15 +209,20 @@ class MainWindow(QMainWindow):
 
         # 检查案件类型
         case_type = self.check_case_type()
+        print(f"案件类型: {case_type}")
 
         # 检查人员类型
         person_type = self.check_person_type()
+        print(f"人员类型: {person_type}")
 
         # 如果是本人类型，检查姓名并复制到受伤职工
         if person_type == "本人":
             name = self.lineEdit_name.text().strip()
+            print(f"本人姓名: '{name}'")
+
             if name:
                 self.lineEdit_injured_worker.setText(name)
+                print("✅ 姓名已复制到受伤职工")
             else:
                 self.statusBar().showMessage("本人信息未填写", 3000)
                 print("错误：本人信息未填写")
@@ -207,16 +237,13 @@ class MainWindow(QMainWindow):
                 self.comboBox_gender.setCurrentText(gender)
 
         # 获取其他基本信息
-        id_address = self.lineEdit_id_address.text().strip()  # 身份证地址
-        current_address = self.lineEdit_current_address.text().strip()  # 现住址
-        phone = self.lineEdit_phone.text().strip()  # 电话
-        position = self.lineEdit_position.text().strip()  # 岗位
+        id_address = self.lineEdit_id_address.text().strip()
+        current_address = self.lineEdit_current_address.text().strip()
+        phone = self.lineEdit_phone.text().strip()
+        position = self.lineEdit_position.text().strip()
 
-        # 获取拟用条例（需要判断具体是哪一条）
-        regulation_index = self.comboBox_regulations.currentIndex()  # 获取选中的索引
-        regulation_text = self.comboBox_regulations.currentText()  # 获取显示文本
-
-        # 根据索引判断具体条例
+        # 获取拟用条例
+        regulation_index = self.comboBox_regulations.currentIndex()
         regulation_mapping = {
             0: "第十四条第一款第一项",
             1: "第十四条第一款第二项",
@@ -229,25 +256,58 @@ class MainWindow(QMainWindow):
         regulation_key = regulation_mapping.get(regulation_index, "未知条例")
 
         # 获取单位信息
-        employer = self.comboBox_employer.currentText().strip()  # 用人单位
-        work_unit = self.comboBox_work_unit.currentText().strip()  # 用工单位
-        workplace = self.comboBox_workplace.currentText().strip()  # 工作场所
+        employer = self.comboBox_employer.currentText().strip()
+        work_unit = self.comboBox_work_unit.currentText().strip()
+        workplace = self.comboBox_workplace.currentText().strip()
+
+        # ====== 打开Word模板 ======
+        print(f"当前目录: {os.path.dirname(__file__)}")
+
+        # 先测试直接打开
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "本人普通案件模板.docx")
+        print(f"模板路径: {template_path}")
+        print(f"模板存在: {os.path.exists(template_path)}")
+
+        if os.path.exists(template_path):
+            print(f"✅ 找到模板，准备打开Word文件")
+
+            # 简单测试：直接打开
+            os.startfile(template_path)  # Windows直接打开
+
+            # 或者使用你的完整方法
+            # self.open_word_template(template_path, {
+            #     '案件类型': case_type,
+            #     '人员类型': person_type,
+            #     '条例': regulation_key,
+            #     '姓名': self.lineEdit_name.text().strip(),
+            #     '年龄': age if 'age' in locals() and age else '',
+            #     '性别': gender if 'gender' in locals() and gender else '',
+            #     '身份证号': id_card if id_card else '',
+            #     '身份证地址': id_address,
+            #     '现住址': current_address,
+            #     '电话': phone,
+            #     '岗位': position,
+            #     '用人单位': employer,
+            #     '用工单位': work_unit,
+            #     '工作场所': workplace
+            # })
+
+            self.statusBar().showMessage("已打开Word文件", 3000)
+        else:
+            print(f"❌ 模板不存在")
+            # 列出templates目录内容
+            templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+            if os.path.exists(templates_dir):
+                files = os.listdir(templates_dir)
+                print(f"templates目录中的文件: {files}")
+            else:
+                print(f"templates目录不存在")
+
+            self.statusBar().showMessage("模板文件不存在", 3000)
 
         # 显示结果
         result = f"案件类型: {case_type}, 人员类型: {person_type}, 条例: {regulation_key}"
-        self.statusBar().showMessage(result, 3000)
-
-        # 打印所有获取的信息（用于调试）
-        print(f"案件类型: {case_type}")
-        print(f"人员类型: {person_type}")
-        print(f"身份证地址: {id_address}")
-        print(f"现住址: {current_address}")
-        print(f"电话: {phone}")
-        print(f"岗位: {position}")
-        print(f"拟用条例: {regulation_key} (显示文本: {regulation_text})")
-        print(f"用人单位: {employer}")
-        print(f"用工单位: {work_unit}")
-        print(f"工作场所: {workplace}")
+        print(result)
 
     def closeEvent(self, event):
         """窗口关闭时最后保存一次"""
