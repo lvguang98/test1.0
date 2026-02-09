@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.uic import loadUi
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import QSettings
 from openpyxl import load_workbook
 from config_manager import ConfigManager
 
