@@ -28,82 +28,164 @@ class MainWindow(QMainWindow):
         # 3. 加载Excel数据到ComboBox
         self.load_excel_to_combobox()
 
+        # 3.1设置ComboBox的自动完成和失去焦点保存功能
+        self.setup_combobox_autosave()
+
         # 4. 加载保存的配置
         self.load_config()
 
         # 5. 连接信号
         self.checkBox_remember.stateChanged.connect(self.on_remember_changed)
         self.btn_generate_record.clicked.connect(self.on_generate_record)
+        # 身份证号框失去焦点
+        self.lineEdit_id_card.editingFinished.connect(self.auto_calculate_id_info)
 
         # 6. 根据记住状态更新界面
         self.update_ui()
 
-    def determine_word_template(self, person_type, case_type, regulation_key):
-        """根据条件确定Word模板文件路径"""
+    def setup_combobox_autosave(self):
+        """设置ComboBox的自动完成和失去焦点保存功能"""
+        # 为每个ComboBox设置相同的功能
+        for combobox_name in ['comboBox_employer', 'comboBox_work_unit', 'comboBox_workplace']:
+            combobox = getattr(self, combobox_name)
 
-        # 1. 检查是否是本人 + 普通案件（最简单的情况）
-        if person_type == "本人" and case_type == "普通案件":
-            # 先检查是否有对应的模板文件
-            template_path = "templates/本人普通案件模板.docx"
-            if os.path.exists(template_path):
-                return template_path
-            else:
-                # 如果文件不存在，创建一个简单的提示
-                self.statusBar().showMessage("模板文件不存在: " + template_path, 3000)
-                return None
+            # 设置可编辑
+            combobox.setEditable(True)
 
-        # 2. 其他情况暂时返回默认模板
-        else:
-            # 可以在这里添加更多的模板判断逻辑
-            default_template = "templates/通用模板.docx"
-            if os.path.exists(default_template):
-                self.statusBar().showMessage(f"使用通用模板: {person_type}+{case_type}", 3000)
-                return default_template
+            # 设置自动完成，显示最多3个相似项
+            from PyQt5.QtCore import Qt
+            from PyQt5.QtWidgets import QCompleter
+
+            # 获取当前列表数据
+            if combobox_name == 'comboBox_employer':
+                data_list = self.employer_list
+            elif combobox_name == 'comboBox_work_unit':
+                data_list = self.work_unit_list
+            else:  # comboBox_workplace
+                data_list = self.workplace_list
+
+            # 创建自动完成器
+            completer = QCompleter(data_list)
+            completer.setFilterMode(Qt.MatchContains)  # 包含匹配
+            completer.setMaxVisibleItems(3)  # 最多显示3个
+            combobox.setCompleter(completer)
+
+            # 获取ComboBox内部的QLineEdit并连接失去焦点事件
+            line_edit = combobox.lineEdit()
+            line_edit.editingFinished.connect(
+                lambda le=line_edit, cb=combobox, name=combobox_name, lst=data_list:
+                self.on_combobox_editing_finished(le, cb, name, lst)
+            )
+
+    def on_combobox_editing_finished(self, line_edit, combobox, combobox_name, current_list):
+        """ComboBox失去焦点时的处理"""
+        # 获取用户输入的文本
+        user_input = line_edit.text().strip()
+
+        if not user_input:
+            return  # 如果输入为空，不处理
+
+        # 检查是否已经在列表中
+        if user_input in current_list:
+            return  # 如果已经在列表中，不重复添加
+
+        # 如果不在列表中，保存到Excel
+        self.save_to_excel(combobox_name, user_input, current_list)
+
+        # 添加到内存列表和ComboBox
+        current_list.append(user_input)
+        combobox.addItem(user_input)
+
+        # 保持用户输入的内容显示在界面上
+        combobox.setCurrentText(user_input)
+
+    def save_to_excel(self, combobox_name, new_item, current_list):
+        """保存新项目到对应的Excel文件"""
+        # 确定文件名和列名
+        if combobox_name == 'comboBox_employer':
+            filename = "用人单位名称汇总.xlsx"
+            column_name = "用人单位"
+        elif combobox_name == 'comboBox_work_unit':
+            filename = "用工单位名称汇总.xlsx"
+            column_name = "用工单位"
+        else:  # comboBox_workplace
+            filename = "工作场所名称汇总.xlsx"
+            column_name = "工作场所"
+
+        try:
+            from openpyxl import load_workbook
+
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            filepath = os.path.join(current_dir, filename)
+
+            # 如果文件存在，追加数据
+            if os.path.exists(filepath):
+                wb = load_workbook(filepath)
+                ws = wb.active
+
+                # 找到第一个空行
+                row = 1
+                while ws.cell(row=row, column=1).value is not None:
+                    row += 1
+
+                # 写入新数据
+                ws.cell(row=row, column=1, value=new_item)
+                wb.save(filepath)
             else:
-                self.statusBar().showMessage("模板文件不存在，请检查templates目录", 3000)
-                return None
+                # 文件不存在，创建新文件
+                wb = load_workbook()
+                ws = wb.active
+                ws.title = "汇总表"
+                ws.cell(row=1, column=1, value=column_name)
+                ws.cell(row=2, column=1, value=new_item)
+                wb.save(filepath)
+
+        except Exception as e:
+            print(f"保存到Excel失败: {e}")
+
+    def auto_calculate_id_info(self):
+        """自动计算身份证信息"""
+        id_card = self.lineEdit_id_card.text().strip()
+        if id_card:
+            _, age, gender = self.calculate_id_info(id_card)
+            if age:
+                self.lineEdit_age.setText(str(age))
+            if gender:
+                self.comboBox_gender.setCurrentText(gender)
 
     def load_excel_to_combobox(self):
         """从Excel文件加载数据到ComboBox"""
-        # 获取当前目录
         current_dir = os.path.dirname(os.path.abspath(__file__))
 
-        # 读取用人单位Excel
-        try:
-            employer_file = os.path.join(current_dir, "用人单位名称汇总.xlsx")
-            if os.path.exists(employer_file):
-                wb = load_workbook(employer_file)
-                ws = wb.active
-                # 读取第一列所有有数据的单元格
-                for row in ws.iter_rows(min_row=1, max_col=1, values_only=True):
-                    if row[0]:  # 检查单元格是否为空
-                        self.comboBox_employer.addItem(str(row[0]))
-        except Exception as e:
-            print(f"读取用人单位Excel失败: {e}")
+        # 加载用人单位
+        self.employer_list = self.load_excel_data(os.path.join(current_dir, "用人单位名称汇总.xlsx"))
+        self.comboBox_employer.addItems(self.employer_list)
 
-        # 读取用工单位Excel
-        try:
-            work_unit_file = os.path.join(current_dir, "用工单位名称汇总.xlsx")
-            if os.path.exists(work_unit_file):
-                wb = load_workbook(work_unit_file)
-                ws = wb.active
-                for row in ws.iter_rows(min_row=1, max_col=1, values_only=True):
-                    if row[0]:
-                        self.comboBox_work_unit.addItem(str(row[0]))
-        except Exception as e:
-            print(f"读取用工单位Excel失败: {e}")
+        # 加载用工单位
+        self.work_unit_list = self.load_excel_data(os.path.join(current_dir, "用工单位名称汇总.xlsx"))
+        self.comboBox_work_unit.addItems(self.work_unit_list)
 
-        # 读取工作场所Excel
+        # 加载工作场所
+        self.workplace_list = self.load_excel_data(os.path.join(current_dir, "工作场所名称汇总.xlsx"))
+        self.comboBox_workplace.addItems(self.workplace_list)
+
+    def load_excel_data(self, filepath):
+        """从Excel文件加载数据到列表"""
+        data_list = []
+
         try:
-            workplace_file = os.path.join(current_dir, "工作场所名称汇总.xlsx")
-            if os.path.exists(workplace_file):
-                wb = load_workbook(workplace_file)
+            if os.path.exists(filepath):
+                wb = load_workbook(filepath)
                 ws = wb.active
+
+                # 读取第一列所有非空数据
                 for row in ws.iter_rows(min_row=1, max_col=1, values_only=True):
-                    if row[0]:
-                        self.comboBox_workplace.addItem(str(row[0]))
+                    if row[0] and str(row[0]).strip():
+                        data_list.append(str(row[0]).strip())
         except Exception as e:
-            print(f"读取工作场所Excel失败: {e}")
+            print(f"读取Excel失败 {filepath}: {e}")
+
+        return data_list
 
     def load_config(self):
         """加载配置到界面"""
@@ -124,7 +206,7 @@ class MainWindow(QMainWindow):
         self.lineEdit_api_url.setEnabled(not remember)
         self.lineEdit_api_key.setEnabled(not remember)
 
-        # 设置样式（灰色背景表示不可编辑）
+        # 设置样式
         if remember:
             style = "background-color: #f0f0f0; color: #666;"
             self.statusBar().showMessage("配置已记住，取消勾选可修改", 2000)
@@ -197,7 +279,7 @@ class MainWindow(QMainWindow):
         if current_month < birth_month or (current_month == birth_month and current_day < birth_day):
             age -= 1
 
-        # 计算性别（第17位，奇数为男，偶数为女）
+        # 计算性别
         gender_num = int(id_card[16])
         gender = "男" if gender_num % 2 == 1 else "女"
 
@@ -205,44 +287,29 @@ class MainWindow(QMainWindow):
 
     def on_generate_record(self):
         """生成笔录按钮点击事件"""
-        print("📝 生成笔录按钮被点击")
-
-        # 检查案件类型
-        case_type = self.check_case_type()
-        print(f"案件类型: {case_type}")
-
-        # 检查人员类型
+        # 1. 获取人员类型
         person_type = self.check_person_type()
-        print(f"人员类型: {person_type}")
 
-        # 如果是本人类型，检查姓名并复制到受伤职工
+        # 2. 如果是本人，检查姓名
         if person_type == "本人":
             name = self.lineEdit_name.text().strip()
-            print(f"本人姓名: '{name}'")
-
             if name:
                 self.lineEdit_injured_worker.setText(name)
-                print("✅ 姓名已复制到受伤职工")
             else:
                 self.statusBar().showMessage("本人信息未填写", 3000)
-                print("错误：本人信息未填写")
                 return
 
-        # 处理身份证信息
+        # 3. 处理身份证信息
         id_card = self.lineEdit_id_card.text().strip()
+        age = None
+        gender = None
         if id_card:
             id_card, age, gender = self.calculate_id_info(id_card)
             if age and gender:
                 self.lineEdit_age.setText(str(age))
                 self.comboBox_gender.setCurrentText(gender)
 
-        # 获取其他基本信息
-        id_address = self.lineEdit_id_address.text().strip()
-        current_address = self.lineEdit_current_address.text().strip()
-        phone = self.lineEdit_phone.text().strip()
-        position = self.lineEdit_position.text().strip()
-
-        # 获取拟用条例
+        # 4. 获取拟用条例
         regulation_index = self.comboBox_regulations.currentIndex()
         regulation_mapping = {
             0: "第十四条第一款第一项",
@@ -255,59 +322,54 @@ class MainWindow(QMainWindow):
         }
         regulation_key = regulation_mapping.get(regulation_index, "未知条例")
 
-        # 获取单位信息
-        employer = self.comboBox_employer.currentText().strip()
-        work_unit = self.comboBox_work_unit.currentText().strip()
-        workplace = self.comboBox_workplace.currentText().strip()
+        # 5. 收集数据
+        current_date = datetime.now().strftime('%Y年%m月%d日')
+        current_time = datetime.now().strftime('%H时%M分')
+        operator = self.lineEdit_operator.text().strip()
 
-        # ====== 打开Word模板 ======
-        print(f"当前目录: {os.path.dirname(__file__)}")
+        data_dict = {
+            '案件类型': self.check_case_type(),
+            '人员类型': person_type,
+            '条例': regulation_key,
+            '当前日期': current_date,
+            '当前时间': current_time,
+            '姓名': self.lineEdit_name.text().strip(),
+            '性别': gender if gender else '',
+            '年龄': str(age) if age else '',
+            '身份证号': id_card if id_card else '',
+            '身份证地址': self.lineEdit_id_address.text().strip(),
+            '现住址': self.lineEdit_current_address.text().strip(),
+            '电话': self.lineEdit_phone.text().strip(),
+            '岗位': self.lineEdit_position.text().strip(),
+            '受伤职工': self.lineEdit_injured_worker.text().strip(),
+            '用人单位': self.comboBox_employer.currentText().strip(),
+            '用工单位': self.comboBox_work_unit.currentText().strip(),
+            '工作场所': self.comboBox_workplace.currentText().strip(),
+            '操作员': operator if operator else "未填写",
+            '生成时间': f"{current_date} {current_time}"
+        }
 
-        # 先测试直接打开
+        # 6. 打开模板并填充
         template_path = os.path.join(os.path.dirname(__file__), "templates", "本人普通案件模板.docx")
-        print(f"模板路径: {template_path}")
-        print(f"模板存在: {os.path.exists(template_path)}")
 
         if os.path.exists(template_path):
-            print(f"✅ 找到模板，准备打开Word文件")
+            from docx import Document
+            doc = Document(template_path)
 
-            # 简单测试：直接打开
-            os.startfile(template_path)  # Windows直接打开
+            for paragraph in doc.paragraphs:
+                text = paragraph.text
+                for key, value in data_dict.items():
+                    if f"{{{key}}}" in text:
+                        text = text.replace(f"{{{key}}}", value)
+                paragraph.text = text
 
-            # 或者使用你的完整方法
-            # self.open_word_template(template_path, {
-            #     '案件类型': case_type,
-            #     '人员类型': person_type,
-            #     '条例': regulation_key,
-            #     '姓名': self.lineEdit_name.text().strip(),
-            #     '年龄': age if 'age' in locals() and age else '',
-            #     '性别': gender if 'gender' in locals() and gender else '',
-            #     '身份证号': id_card if id_card else '',
-            #     '身份证地址': id_address,
-            #     '现住址': current_address,
-            #     '电话': phone,
-            #     '岗位': position,
-            #     '用人单位': employer,
-            #     '用工单位': work_unit,
-            #     '工作场所': workplace
-            # })
+            temp_file = f"temp_笔录.docx"
+            doc.save(temp_file)
+            os.startfile(temp_file)
 
-            self.statusBar().showMessage("已打开Word文件", 3000)
+            self.statusBar().showMessage("笔录生成完成", 3000)
         else:
-            print(f"❌ 模板不存在")
-            # 列出templates目录内容
-            templates_dir = os.path.join(os.path.dirname(__file__), "templates")
-            if os.path.exists(templates_dir):
-                files = os.listdir(templates_dir)
-                print(f"templates目录中的文件: {files}")
-            else:
-                print(f"templates目录不存在")
-
             self.statusBar().showMessage("模板文件不存在", 3000)
-
-        # 显示结果
-        result = f"案件类型: {case_type}, 人员类型: {person_type}, 条例: {regulation_key}"
-        print(result)
 
     def closeEvent(self, event):
         """窗口关闭时最后保存一次"""
@@ -327,11 +389,9 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
 
-    # 设置应用信息
     app.setApplicationName("工伤案件管理系统")
     app.setOrganizationName("WorkInjuryApp")
 
-    # 创建并显示窗口
     window = MainWindow()
     window.show()
 
