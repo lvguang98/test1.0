@@ -46,6 +46,42 @@ class MainWindow(QMainWindow):
         # 6. 根据记住状态更新界面
         self.update_ui()
 
+        # 连接人员类型切换信号
+        self.radio_self.toggled.connect(self.on_person_type_changed)
+        self.radio_witness.toggled.connect(self.on_person_type_changed)
+        self.radio_legal_entity.toggled.connect(self.on_person_type_changed)
+
+        # 本人姓名失去焦点时自动填入受伤职工
+        self.lineEdit_name.editingFinished.connect(self.auto_fill_injured_worker)
+
+    def auto_fill_injured_worker(self):
+        """本人姓名输入完成时自动填入受伤职工"""
+        if self.check_person_type() == "本人":
+            name = self.lineEdit_name.text().strip()
+            if name:
+                self.lineEdit_injured_worker.setText(name)
+
+    def on_person_type_changed(self):
+        """人员类型切换时的处理"""
+        if self.sender().isChecked():
+            person_type = self.check_person_type()
+            self.statusBar().showMessage(f"当前人员类型: {person_type}", 1500)
+
+            # 切换时清空相关字段
+            if person_type in ["本人", "证人", "法人"]:
+                self.clear_person_fields()
+
+    def clear_person_fields(self):
+        """清空人员信息字段"""
+        self.lineEdit_name.clear()
+        self.lineEdit_age.clear()
+        self.comboBox_gender.setCurrentIndex(-1)
+        self.lineEdit_id_card.clear()
+        self.lineEdit_id_address.clear()
+        self.lineEdit_current_address.clear()
+        self.lineEdit_phone.clear()
+        self.lineEdit_position.clear()
+
     def setup_delete_buttons(self):
         """设置删除按钮功能"""
         self.btn_delete_employer.clicked.connect(
@@ -367,46 +403,100 @@ class MainWindow(QMainWindow):
         return id_card, age, gender
 
     def on_generate_record(self):
-        """生成笔录按钮点击事件"""
-        # 1. 获取人员类型
-        person_type = self.check_person_type()
+        """生成笔录按钮点击"""
+        # 1. 收集数据
+        data = self.collect_form_data()
 
-        # 2. 如果是本人，检查姓名
-        if person_type == "本人":
-            name = self.lineEdit_name.text().strip()
-            if name:
-                self.lineEdit_injured_worker.setText(name)
-            else:
-                self.statusBar().showMessage("本人信息未填写", 3000)
-                return
+        # 2. 根据人员类型分流
+        if data['人员类型'] == "本人":
+            self.handle_person_case(data)
+        elif data['人员类型'] == "证人":
+            self.handle_witness_case(data)
+        elif data['人员类型'] == "法人":
+            self.handle_legal_case(data)
 
-        # 3. 获取受伤职工姓名和身份证
-        injured_name = self.lineEdit_injured_worker.text().strip()
-        id_card = self.lineEdit_id_card.text().strip()
+    def handle_person_case(self, data):
+        """处理本人案件"""
+        # ========== 新增：检查是否已有案本 ==========
+        import json
+        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
 
-        if not injured_name:
-            self.statusBar().showMessage("请填写受伤职工姓名", 3000)
-            return
+        if os.path.exists(index_file):
+            with open(index_file, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
 
-        # 4. 搜索同名案件
-        same_name_cases = self.search_same_name_cases(injured_name, id_card)
+            # 搜索同名+同身份证的案件
+            same_person_cases = []
+            for case in index_data.get('cases', []):
+                if (case['person_name'] == data['受伤职工'] and
+                        case['id_card'] == data['本人身份证号']):
+                    same_person_cases.append(case)
 
-        if same_name_cases:
-            # 弹出选择窗口
-            selected_case = self.show_case_selection_dialog(injured_name, same_name_cases, id_card)
+            if same_person_cases:
+                # 取最新的案本（按年份倒序）
+                latest_case = sorted(same_person_cases, key=lambda x: x['year'], reverse=True)[0]
 
-            if selected_case == "new":
-                # 继续新建
-                self.create_new_case(injured_name)
-            elif selected_case:
-                # 关联旧案本
-                self.link_to_existing_case(selected_case, injured_name)
-            else:
-                # 用户取消
-                return
-        else:
-            # 没有同名案件，直接新建
-            self.create_new_case(injured_name)
+                # 弹窗询问
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, '发现已有案本',
+                    f'该伤者已有案本: {latest_case["case_number"]}\n是否关联并打开？\n\n选“是”=关联并打开\n选“否”=新建案本',
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    # 1. 把本人信息填到界面
+                    person_info = latest_case.get('person_info', {})
+                    self.lineEdit_name.setText(person_info.get('name', ''))
+                    self.lineEdit_id_card.setText(latest_case.get('id_card', ''))
+                    self.lineEdit_phone.setText(person_info.get('phone', ''))
+                    # 触发身份证自动计算
+                    if latest_case.get('id_card'):
+                        self.auto_calculate_id_info()
+
+                    # 2. 检查是否有本人笔录文件
+                    case_folder = os.path.join(os.path.dirname(__file__), latest_case['folder_path'])
+                    transcript_file = os.path.join(case_folder, f"{latest_case['case_number']}_笔录.docx")
+
+                    if os.path.exists(transcript_file):
+                        os.startfile(transcript_file)
+                        self.statusBar().showMessage(f"已打开案本: {latest_case['case_number']}", 3000)
+                    else:
+                        self.statusBar().showMessage(f"该案本无本人笔录文件", 3000)
+
+                    return  # 直接结束，不新建
+
+        # ========== 原有代码：新建案本 ==========
+        case_number = self.generate_case_number(data['受伤职工'])
+        data['案本号'] = case_number
+        year_folder = self.get_current_year_folder()
+        case_folder = os.path.join(year_folder, case_number)
+        os.makedirs(case_folder, exist_ok=True)
+        self.update_case_index(case_number, data['受伤职工'], data)
+        self.generate_transcript(case_folder, "本人普通案件模板.docx", data)
+
+    def handle_witness_case(self, data):
+        """处理证人案件"""
+        case_number = self.generate_case_number(data['受伤职工'])
+        data['案本号'] = case_number
+
+        year_folder = self.get_current_year_folder()
+        case_folder = os.path.join(year_folder, case_number)
+        os.makedirs(case_folder, exist_ok=True)
+
+        self.generate_transcript(case_folder, "证人模板.docx", data)
+
+    def handle_legal_case(self, data):
+        """处理法人案件"""
+        case_number = self.generate_case_number(data['受伤职工'])
+        data['案本号'] = case_number
+
+        year_folder = self.get_current_year_folder()
+        case_folder = os.path.join(year_folder, case_number)
+        os.makedirs(case_folder, exist_ok=True)
+
+        self.generate_transcript(case_folder, "法人模板.docx", data)
 
     def search_same_name_cases(self, name, id_card):
         """搜索同名案件"""
@@ -590,120 +680,84 @@ class MainWindow(QMainWindow):
         # 生成笔录
         self.generate_transcript(case_number, case_folder, "本人普通案件模板.docx", injured_name)
 
-    def generate_transcript(self, case_number, case_folder, template_name, injured_name):
-        """生成笔录文件"""
-        # 1. 处理身份证信息
+    def collect_form_data(self):
+        """收集当前表单所有数据"""
         id_card = self.lineEdit_id_card.text().strip()
-        age = None
-        gender = None
-        if id_card:
-            id_card, age, gender = self.calculate_id_info(id_card)
-            if age and gender:
-                self.lineEdit_age.setText(str(age))
-                self.comboBox_gender.setCurrentText(gender)
+        _, age, gender = self.calculate_id_info(id_card) if id_card else (None, None, None)
 
-        # 2. 获取拟用条例
-        regulation_index = self.comboBox_regulations.currentIndex()
-        regulation_mapping = {
-            0: "第十四条第一款第一项",
-            1: "第十四条第一款第二项",
-            2: "第十四条第一款第三项",
-            3: "第十四条第一款第四项",
-            4: "第十四条第一款第五项",
-            5: "第十四条第一款第六项",
-            6: "第十五条第一款第一项"
-        }
-        regulation_key = regulation_mapping.get(regulation_index, "未知条例")
-
-        # 3. 收集数据
-        current_date = datetime.now().strftime('%Y年%m月%d日')
-        current_time = datetime.now().strftime('%H时%M分')
-        operator = self.lineEdit_operator.text().strip()
-
-        data_dict = {
-            '案本号': case_number,
-            '案件类型': self.check_case_type(),
-            '人员类型': self.check_person_type(),
-            '条例': regulation_key,
-            '当前日期': current_date,
-            '当前时间': current_time,
-            '姓名': self.lineEdit_name.text().strip(),
-            '性别': gender if gender else '',
-            '年龄': str(age) if age else '',
-            '身份证号': id_card if id_card else '',
-            '身份证地址': self.lineEdit_id_address.text().strip(),
-            '现住址': self.lineEdit_current_address.text().strip(),
-            '电话': self.lineEdit_phone.text().strip(),
-            '岗位': self.lineEdit_position.text().strip(),
-            '受伤职工': injured_name,
+        # 获取人员类型作为前缀
+        prefix = self.check_person_type()  # "本人" / "证人" / "法人"
+        data = {
+            '案本号': '',
+            '受伤职工': self.lineEdit_injured_worker.text().strip(),
             '用人单位': self.comboBox_employer.currentText().strip(),
             '用工单位': self.comboBox_work_unit.currentText().strip(),
             '工作场所': self.comboBox_workplace.currentText().strip(),
-            '操作员': operator if operator else "未填写",
-            '生成时间': f"{current_date} {current_time}"
+            '人员类型': prefix,
+            '案件类型': self.check_case_type(),
+            '条例': self.comboBox_regulations.currentText(),
+            '操作员': self.lineEdit_operator.text().strip(),
+            '当前日期': datetime.now().strftime('%Y年%m月%d日'),
+            '当前时间': datetime.now().strftime('%H时%M分'),
         }
 
-        # 4. 确定模板路径
+        # 用变量作为前缀
+        data[f'{prefix}姓名'] = self.lineEdit_name.text().strip()
+        data[f'{prefix}性别'] = gender if gender else self.comboBox_gender.currentText()
+        data[f'{prefix}年龄'] = str(age) if age else self.lineEdit_age.text().strip()
+        data[f'{prefix}身份证号'] = id_card
+        data[f'{prefix}身份证地址'] = self.lineEdit_id_address.text().strip()
+        data[f'{prefix}现住址'] = self.lineEdit_current_address.text().strip()
+        data[f'{prefix}电话'] = self.lineEdit_phone.text().strip()
+        data[f'{prefix}岗位'] = self.lineEdit_position.text().strip()
+
+        return data
+
+    def generate_transcript(self, case_folder, template_name, data):
+        """生成Word文档"""
         template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
 
         if not os.path.exists(template_path):
-            # 如果补充模板不存在，使用普通模板
-            if template_name == "本人补充笔录.docx":
-                template_path = os.path.join(os.path.dirname(__file__), "templates", "本人普通案件模板.docx")
-                if not os.path.exists(template_path):
-                    self.statusBar().showMessage("模板文件不存在", 3000)
-                    return False
-
-        # 5. 生成Word文档
-        try:
-            from docx import Document
-            doc = Document(template_path)
-
-            # 替换占位符
-            for paragraph in doc.paragraphs:
-                text = paragraph.text
-                for key, value in data_dict.items():
-                    if f"{{{key}}}" in text:
-                        text = text.replace(f"{{{key}}}", value)
-                paragraph.text = text
-
-            # 6. 确定文件名
-            if template_name == "本人补充笔录.docx":
-                # 补充笔录编号
-                supplement_count = 1
-                while True:
-                    doc_file = os.path.join(case_folder, f"{case_number}_补充笔录_{supplement_count:03d}.docx")
-                    if not os.path.exists(doc_file):
-                        break
-                    supplement_count += 1
-            else:
-                doc_file = os.path.join(case_folder, f"{case_number}_笔录.docx")
-
-            # 7. 保存文件
-            doc.save(doc_file)
-
-            # 8. 打开文件
-            os.startfile(doc_file)
-
-            self.statusBar().showMessage(f"笔录生成完成: {case_number}", 3000)
-            return True
-
-        except Exception as e:
-            self.statusBar().showMessage(f"生成笔录失败: {str(e)}", 3000)
+            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
             return False
 
-    def update_case_index(self, case_number, person_name):
+        from docx import Document
+        doc = Document(template_path)
+
+        # 替换占位符
+        for paragraph in doc.paragraphs:
+            text = paragraph.text
+            for key, value in data.items():
+                if f"{{{key}}}" in text:
+                    text = text.replace(f"{{{key}}}", value)
+            paragraph.text = text
+
+        # 保存文件
+        doc_file = os.path.join(case_folder, f"{data['案本号']}_笔录.docx")
+        doc.save(doc_file)
+        os.startfile(doc_file)
+
+        self.statusBar().showMessage(f"笔录生成完成: {data['案本号']}", 3000)
+        return True
+
+    def update_case_index(self, case_number, person_name, data):
         """更新案件索引"""
         index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
 
         case_data = {
             'case_number': case_number,
             'person_name': person_name,
-            'id_card': self.lineEdit_id_card.text().strip(),
-            'case_type': self.check_case_type(),
+            'id_card': data['本人身份证号'],
+            'case_type': data['案件类型'],
             'year': datetime.now().year,
             'folder_path': f"{datetime.now().year}/{case_number}",
-            'created_date': datetime.now().strftime('%Y-%m-%d')
+            'created_date': datetime.now().strftime('%Y-%m-%d'),
+            'person_info': {
+                'name': data['本人姓名'],
+                'gender': data['本人性别'],
+                'age': data['本人年龄'],
+                'phone': data['本人电话']
+            }
         }
 
         try:
