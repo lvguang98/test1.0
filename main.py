@@ -474,7 +474,7 @@ class MainWindow(QMainWindow):
         case_folder = os.path.join(year_folder, case_number)
         os.makedirs(case_folder, exist_ok=True)
         self.update_case_index(case_number, data['受伤职工'], data)
-        self.generate_transcript(case_folder, "本人普通案件模板.docx", data)
+        self.generate_transcript(case_folder, "本人谈话笔录（普通工伤案件）.docx", data)
 
     def handle_witness_case(self, data):
         """处理证人案件"""
@@ -586,7 +586,7 @@ class MainWindow(QMainWindow):
         filepath = os.path.join(case_folder, filename)
 
         # 使用证人模板
-        template_path = os.path.join(os.path.dirname(__file__), "templates", "证人模板.docx")
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "证人谈话笔录（普通工伤案件）.docx")
 
         if not os.path.exists(template_path):
             self.statusBar().showMessage("证人模板不存在", 3000)
@@ -620,14 +620,163 @@ class MainWindow(QMainWindow):
 
     def handle_legal_case(self, data):
         """处理法人案件"""
-        case_number = self.generate_case_number(data['受伤职工'])
-        data['案本号'] = case_number
+        try:
+            injured_name = data['受伤职工']
+            legal_name = data['法人姓名']  # 法人姓名（从界面获取）
+            legal_id = data['法人身份证号']  # 法人身份证号
 
-        year_folder = self.get_current_year_folder()
-        case_folder = os.path.join(year_folder, case_number)
-        os.makedirs(case_folder, exist_ok=True)
+            # ========== 1. 查找本人文件夹 ==========
+            year_folder = self.get_current_year_folder()
 
-        self.generate_transcript(case_folder, "法人模板.docx", data)
+            # 搜索所有案本文件夹，找出包含受伤职工姓名的
+            matching_folders = []
+            if os.path.exists(year_folder):
+                for folder in os.listdir(year_folder):
+                    # 案本号格式：前缀-姓名-序号，例如 "GS-张三-001"
+                    parts = folder.split('-')
+                    if len(parts) >= 2 and parts[1] == injured_name:
+                        matching_folders.append(folder)
+
+            if not matching_folders:
+                # ========== 情况1：没有本人文件夹 ==========
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, '未找到本人案本',
+                    f'未找到伤者 "{injured_name}" 的案本文件夹\n是否新建案本？',
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.No:
+                    return
+
+                # 用受伤职工姓名创建新案本
+                case_number = self.generate_case_number(injured_name)
+                data['案本号'] = case_number
+                case_folder = os.path.join(year_folder, case_number)
+                os.makedirs(case_folder, exist_ok=True)
+
+                # 生成第一个法人笔录
+                self.create_legal_transcript(case_folder, data, legal_number=1)
+                return
+
+            # ========== 情况2：有本人文件夹，取最新的一个 ==========
+            case_folder_name = sorted(matching_folders)[-1]  # 取最新的
+            case_number = case_folder_name
+            data['案本号'] = case_number
+            case_folder = os.path.join(year_folder, case_folder_name)
+
+            # ========== 3. 查找该文件夹下所有法人笔录 ==========
+            legal_files = []
+            if os.path.exists(case_folder):
+                for file in os.listdir(case_folder):
+                    if file.endswith('.docx') and '法人' in file:
+                        legal_files.append(file)
+
+            if not legal_files:
+                # ========== 情况2.1：没有法人笔录，直接生成第一个 ==========
+                self.create_legal_transcript(case_folder, data, legal_number=1)
+                return
+
+            # ========== 情况2.2：已有法人笔录，检查是否同一法人 ==========
+            import re
+            legal_exists = False
+            max_number = 0
+
+            for file in legal_files:
+                # 文件名格式：受伤职工姓名_法人XX_法人姓名.docx
+                # 例如：张三_法人01_李四.docx
+                match = re.search(r'法人(\d+)_(.+?)\.docx', file)
+                if match:
+                    num = int(match.group(1))
+                    existing_legal_name = match.group(2)
+                    max_number = max(max_number, num)
+
+                    # 如果法人姓名相同，视为同一法人
+                    if existing_legal_name == legal_name:
+                        legal_exists = True
+                        existing_file = os.path.join(case_folder, file)
+
+            if legal_exists:
+                # ========== 情况2.2.1：同一法人，询问关联或新建 ==========
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, '法人已存在',
+                    f'法人 "{legal_name}" 已有笔录\n是否打开？\n\n选“是”=打开\n选“否”=新建另一份',
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    os.startfile(existing_file)
+                    self.statusBar().showMessage(f"已打开法人笔录", 3000)
+                else:
+                    # 新建另一份（编号+1）
+                    self.create_legal_transcript(case_folder, data, legal_number=max_number + 1)
+            else:
+                # ========== 情况2.2.2：新法人，直接生成 ==========
+                self.create_legal_transcript(case_folder, data, legal_number=max_number + 1)
+
+        except Exception as e:
+            import traceback
+            print("=" * 50)
+            print("法人案件处理出错:")
+            traceback.print_exc()
+            print("=" * 50)
+            self.statusBar().showMessage(f"错误: {str(e)}", 3000)
+
+    def create_legal_transcript(self, case_folder, data, legal_number):
+        """生成法人笔录"""
+        injured_name = data['受伤职工']
+        legal_name = data['法人姓名']
+
+        # 生成文件名：受伤职工姓名_法人XX_法人姓名.docx
+        filename = f"{injured_name}_法人{legal_number:02d}_{legal_name}.docx"
+        filepath = os.path.join(case_folder, filename)
+
+        # 使用法人模板
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "法人谈话笔录（普通工伤案件）.docx")
+
+        # 打印调试信息
+        print(f"模板路径: {template_path}")
+        print(f"文件是否存在: {os.path.exists(template_path)}")
+
+        if not os.path.exists(template_path):
+            self.statusBar().showMessage("法人模板不存在", 3000)
+            return False
+
+        try:
+            from docx import Document
+            doc = Document(template_path)
+
+            # 替换占位符
+            placeholders = {
+                '受伤职工': injured_name,
+                '法人姓名': legal_name,
+                '法人身份证': data.get('法人身份证号', ''),
+                '法人电话': data.get('法人电话', ''),
+                '法人岗位': data.get('法人岗位', ''),
+                '当前日期': datetime.now().strftime('%Y年%m月%d日'),
+                '当前时间': datetime.now().strftime('%H时%M分'),
+            }
+
+            for paragraph in doc.paragraphs:
+                text = paragraph.text
+                for key, value in placeholders.items():
+                    if f"{{{key}}}" in text:
+                        text = text.replace(f"{{{key}}}", value)
+                paragraph.text = text
+
+            doc.save(filepath)
+            os.startfile(filepath)
+
+            self.statusBar().showMessage(f"法人笔录已生成: {filename}", 3000)
+            return True
+
+        except Exception as e:
+            print(f"生成法人笔录失败: {e}")
+            self.statusBar().showMessage(f"生成失败: {str(e)}", 3000)
+            return False
 
     def search_same_name_cases(self, name, id_card):
         """搜索同名案件"""
