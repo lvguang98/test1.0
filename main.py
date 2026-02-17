@@ -54,6 +54,9 @@ class MainWindow(QMainWindow):
         # 本人姓名失去焦点时自动填入受伤职工
         self.lineEdit_name.editingFinished.connect(self.auto_fill_injured_worker)
 
+        self.current_case_number = None  # 当前使用的案本号
+        self.current_folder_path = None  # 当前使用的文件夹路径
+
     def auto_fill_injured_worker(self):
         """本人姓名输入完成时自动填入受伤职工"""
         if self.check_person_type() == "本人":
@@ -148,7 +151,6 @@ class MainWindow(QMainWindow):
                     ws.delete_rows(row_to_delete)
                     wb.save(filepath)
                     self.statusBar().showMessage(f'已删除: {selected_text}', 3000)
-                    print(f"✅ 已从Excel删除: {selected_text}")
                 else:
                     self.statusBar().showMessage("未在Excel中找到该项目", 3000)
             else:
@@ -160,7 +162,6 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.statusBar().showMessage(f"删除失败: {str(e)}", 3000)
-            print(f"❌ 删除失败: {e}")
 
     def setup_combobox_autosave(self):
         """设置ComboBox的自动完成和失去焦点保存功能"""
@@ -416,6 +417,18 @@ class MainWindow(QMainWindow):
             self.handle_legal_case(data)
 
     def handle_person_case(self, data):
+        # 1. 生成自我介绍
+        description = self.generate_description(data)
+        print(description)
+
+        # 2. 根据案件类型生成问答句
+        case_type = data['案件类型']
+        if case_type != "普通案件":
+            questions = self.generate_case_questions(case_type, data)
+            if questions:
+                print(f"\n=== {case_type}问答句 ===")
+                for q in questions:
+                    print(q)
         """处理本人案件"""
         # ========== 检查是否已有案本 ==========
         import json
@@ -425,11 +438,10 @@ class MainWindow(QMainWindow):
             with open(index_file, 'r', encoding='utf-8') as f:
                 index_data = json.load(f)
 
-            # 搜索同名+同身份证的案件
+            # 搜索同名案件（包括身份证不同的）
             same_person_cases = []
             for case in index_data.get('cases', []):
-                if (case['person_name'] == data['受伤职工'] and
-                        case['id_card'] == data['本人身份证号']):
+                if case['person_name'] == data['受伤职工']:  # 只要姓名相同就加入
                     same_person_cases.append(case)
 
             # 如果有多个，让用户选择
@@ -445,6 +457,10 @@ class MainWindow(QMainWindow):
                     pass
                 elif selected_case:
                     # 用户选了具体案本 → 关联并打开
+                    # 1. 把本人信息填到界面
+                    self.current_case_number = selected_case['case_number']
+                    self.current_folder_path = selected_case['folder_path']
+
                     # 1. 把本人信息填到界面
                     person_info = selected_case.get('person_info', {})
                     self.lineEdit_name.setText(person_info.get('name', ''))
@@ -473,56 +489,47 @@ class MainWindow(QMainWindow):
         year_folder = self.get_current_year_folder()
         case_folder = os.path.join(year_folder, case_number)
         os.makedirs(case_folder, exist_ok=True)
+
+        # 保存当前使用的案本信息
+        self.current_case_number = case_number
+        self.current_folder_path = f"{datetime.now().year}/{case_number}"
+
         self.update_case_index(case_number, data['受伤职工'], data)
-        self.generate_transcript(case_folder, "本人谈话笔录（普通工伤案件）.docx", data)
+        template_name = self.get_template_name(data)
+        self.generate_transcript(case_folder, template_name, data)
 
     def handle_witness_case(self, data):
+        # 1. 生成自我介绍
+        description = self.generate_description(data)
+        print(description)
+
+        # 2. 根据案件类型生成问答句
+        case_type = data['案件类型']
+        if case_type != "普通案件":
+            questions = self.generate_case_questions(case_type, data)
+            if questions:
+                print(f"\n=== {case_type}问答句（证人版）===")
+                for q in questions:
+                    print(q)
         """处理证人案件"""
-        injured_name = data['受伤职工']  # 受伤职工姓名
-        witness_name = data['证人姓名']  # 证人姓名（从界面获取）
-        witness_id = data['证人身份证号']  # 证人身份证号
-
-        # ========== 1. 查找本人文件夹 ==========
-        year_folder = self.get_current_year_folder()
-
-        # 搜索所有案本文件夹，找出包含受伤职工姓名的
-        matching_folders = []
-        if os.path.exists(year_folder):
-            for folder in os.listdir(year_folder):
-                # 案本号格式：前缀-姓名-序号，例如 "GS-张三-001"
-                parts = folder.split('-')
-                if len(parts) >= 2 and parts[1] == injured_name:
-                    matching_folders.append(folder)
-
-        if not matching_folders:
-            # ========== 情况1：没有本人文件夹 ==========
-            reply = QMessageBox.question(
-                self, '未找到本人案本',
-                f'未找到伤者 "{injured_name}" 的案本文件夹\n是否新建案本？',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-
-            if reply == QMessageBox.No:
-                return
-
-            # 用受伤职工姓名创建新案本
-            case_number = self.generate_case_number(injured_name)
-            data['案本号'] = case_number
-            case_folder = os.path.join(year_folder, case_number)
-            os.makedirs(case_folder, exist_ok=True)
-
-            # 生成第一个证人笔录
-            self.create_witness_transcript(case_folder, data, witness_number=1)
+        # ===== 强制检查是否有当前案本号 =====
+        if not self.current_case_number:
+            QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
-        # ========== 情况2：有本人文件夹，取最新的一个 ==========
-        case_folder_name = sorted(matching_folders)[-1]  # 取最新的
-        case_number = case_folder_name
+        witness_name = data.get('证人姓名', '')  # ← 添加这一行
+        # 直接使用保存的案本信息
+        case_number = self.current_case_number
         data['案本号'] = case_number
-        case_folder = os.path.join(year_folder, case_folder_name)
 
-        # ========== 3. 查找该文件夹下所有证人笔录 ==========
+        year_folder = self.get_current_year_folder()
+        case_folder = os.path.join(year_folder, case_number)
+
+        # 确保文件夹存在
+        if not os.path.exists(case_folder):
+            os.makedirs(case_folder, exist_ok=True)
+
+        # ===== 查找该文件夹下所有证人笔录 =====
         witness_files = []
         if os.path.exists(case_folder):
             for file in os.listdir(case_folder):
@@ -531,7 +538,8 @@ class MainWindow(QMainWindow):
 
         if not witness_files:
             # ========== 情况2.1：没有证人笔录，直接生成第一个 ==========
-            self.create_witness_transcript(case_folder, data, witness_number=1)
+            template_name = self.get_template_name(data)  # ← 加这行
+            self.create_witness_transcript(case_folder, data, witness_number=1, template_name=template_name)
             return
 
         # ========== 情况2.2：已有证人笔录，检查是否同一证人 ==========
@@ -541,6 +549,7 @@ class MainWindow(QMainWindow):
         import re
         witness_exists = False
         max_number = 0
+        existing_file = None
 
         for file in witness_files:
             # 文件名格式：受伤职工姓名_证人XX_证人姓名.docx
@@ -570,13 +579,17 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"已打开证人笔录", 3000)
             else:
                 # 新建另一份（编号+1）
-                self.create_witness_transcript(case_folder, data, witness_number=max_number + 1)
+                template_name = self.get_template_name(data)  # ← 加这行
+                self.create_witness_transcript(case_folder, data, witness_number=max_number + 1,
+                                               template_name=template_name)
         else:
             # ========== 情况2.2.2：新证人，直接生成 ==========
-            self.create_witness_transcript(case_folder, data, witness_number=max_number + 1)
+            template_name = self.get_template_name(data)  # ← 加这行
+            self.create_witness_transcript(case_folder, data, witness_number=max_number + 1,
+                                           template_name=template_name)
 
     # 和证人方法同一个范围的的方法，可能有补充和调整
-    def create_witness_transcript(self, case_folder, data, witness_number):
+    def create_witness_transcript(self, case_folder, data, witness_number, template_name):
         """生成证人笔录"""
         injured_name = data['受伤职工']
         witness_name = data['证人姓名']
@@ -585,17 +598,17 @@ class MainWindow(QMainWindow):
         filename = f"{injured_name}_证人{witness_number:02d}_{witness_name}.docx"
         filepath = os.path.join(case_folder, filename)
 
-        # 使用证人模板
-        template_path = os.path.join(os.path.dirname(__file__), "templates", "证人谈话笔录（普通工伤案件）.docx")
+        # 使用传入的模板名
+        template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
 
         if not os.path.exists(template_path):
-            self.statusBar().showMessage("证人模板不存在", 3000)
+            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
             return False
 
         from docx import Document
         doc = Document(template_path)
 
-        # 替换占位符（需要你根据模板实际占位符调整）
+        # 替换占位符
         placeholders = {
             '受伤职工': injured_name,
             '证人姓名': witness_name,
@@ -614,59 +627,45 @@ class MainWindow(QMainWindow):
 
         doc.save(filepath)
         os.startfile(filepath)
-
+        self.update_case_index(data['案本号'], data['受伤职工'], data)
         self.statusBar().showMessage(f"证人笔录已生成: {filename}", 3000)
         return True
 
     def handle_legal_case(self, data):
+        # 1. 生成自我介绍
+        description = self.generate_description(data)
+        print(description)
+
+        # 2. 根据案件类型生成问答句
+        case_type = data['案件类型']
+        if case_type != "普通案件":
+            questions = self.generate_case_questions(case_type, data)
+            if questions:
+                print(f"\n=== {case_type}问答句（法人版）===")
+                for q in questions:
+                    print(q)
         """处理法人案件"""
+        # ===== 强制检查是否有当前案本号 =====
+        if not self.current_case_number:
+            QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
+            return
+
         try:
             injured_name = data['受伤职工']
-            legal_name = data['法人姓名']  # 法人姓名（从界面获取）
-            legal_id = data['法人身份证号']  # 法人身份证号
+            legal_name = data['法人姓名']
 
-            # ========== 1. 查找本人文件夹 ==========
+            # 直接使用保存的案本信息
+            case_number = self.current_case_number
+            data['案本号'] = case_number
+
             year_folder = self.get_current_year_folder()
+            case_folder = os.path.join(year_folder, case_number)
 
-            # 搜索所有案本文件夹，找出包含受伤职工姓名的
-            matching_folders = []
-            if os.path.exists(year_folder):
-                for folder in os.listdir(year_folder):
-                    # 案本号格式：前缀-姓名-序号，例如 "GS-张三-001"
-                    parts = folder.split('-')
-                    if len(parts) >= 2 and parts[1] == injured_name:
-                        matching_folders.append(folder)
-
-            if not matching_folders:
-                # ========== 情况1：没有本人文件夹 ==========
-                from PyQt5.QtWidgets import QMessageBox
-                reply = QMessageBox.question(
-                    self, '未找到本人案本',
-                    f'未找到伤者 "{injured_name}" 的案本文件夹\n是否新建案本？',
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-
-                if reply == QMessageBox.No:
-                    return
-
-                # 用受伤职工姓名创建新案本
-                case_number = self.generate_case_number(injured_name)
-                data['案本号'] = case_number
-                case_folder = os.path.join(year_folder, case_number)
+            # 确保文件夹存在
+            if not os.path.exists(case_folder):
                 os.makedirs(case_folder, exist_ok=True)
 
-                # 生成第一个法人笔录
-                self.create_legal_transcript(case_folder, data, legal_number=1)
-                return
-
-            # ========== 情况2：有本人文件夹，取最新的一个 ==========
-            case_folder_name = sorted(matching_folders)[-1]  # 取最新的
-            case_number = case_folder_name
-            data['案本号'] = case_number
-            case_folder = os.path.join(year_folder, case_folder_name)
-
-            # ========== 3. 查找该文件夹下所有法人笔录 ==========
+            # ===== 查找该文件夹下所有法人笔录 =====
             legal_files = []
             if os.path.exists(case_folder):
                 for file in os.listdir(case_folder):
@@ -674,18 +673,18 @@ class MainWindow(QMainWindow):
                         legal_files.append(file)
 
             if not legal_files:
-                # ========== 情况2.1：没有法人笔录，直接生成第一个 ==========
-                self.create_legal_transcript(case_folder, data, legal_number=1)
+                # ===== 没有法人笔录，直接生成第一个 =====
+                template_name = self.get_template_name(data)  # ← 加这行
+                self.create_legal_transcript(case_folder, data, legal_number=1, template_name=template_name)
                 return
 
-            # ========== 情况2.2：已有法人笔录，检查是否同一法人 ==========
+            # ===== 已有法人笔录，检查是否同一法人 =====
             import re
             legal_exists = False
             max_number = 0
 
             for file in legal_files:
                 # 文件名格式：受伤职工姓名_法人XX_法人姓名.docx
-                # 例如：张三_法人01_李四.docx
                 match = re.search(r'法人(\d+)_(.+?)\.docx', file)
                 if match:
                     num = int(match.group(1))
@@ -698,8 +697,7 @@ class MainWindow(QMainWindow):
                         existing_file = os.path.join(case_folder, file)
 
             if legal_exists:
-                # ========== 情况2.2.1：同一法人，询问关联或新建 ==========
-                from PyQt5.QtWidgets import QMessageBox
+                # ===== 同一法人，询问关联或新建 =====
                 reply = QMessageBox.question(
                     self, '法人已存在',
                     f'法人 "{legal_name}" 已有笔录\n是否打开？\n\n选“是”=打开\n选“否”=新建另一份',
@@ -712,10 +710,14 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"已打开法人笔录", 3000)
                 else:
                     # 新建另一份（编号+1）
-                    self.create_legal_transcript(case_folder, data, legal_number=max_number + 1)
+                    template_name = self.get_template_name(data)  # ← 加这行
+                    self.create_legal_transcript(case_folder, data, legal_number=max_number + 1,
+                                                 template_name=template_name)
             else:
-                # ========== 情况2.2.2：新法人，直接生成 ==========
-                self.create_legal_transcript(case_folder, data, legal_number=max_number + 1)
+                # ===== 新法人，直接生成 =====
+                template_name = self.get_template_name(data)  # ← 加这行
+                self.create_legal_transcript(case_folder, data, legal_number=max_number + 1,
+                                             template_name=template_name)
 
         except Exception as e:
             import traceback
@@ -725,7 +727,40 @@ class MainWindow(QMainWindow):
             print("=" * 50)
             self.statusBar().showMessage(f"错误: {str(e)}", 3000)
 
-    def create_legal_transcript(self, case_folder, data, legal_number):
+    def generate_case_questions(self, case_type, data):
+        """根据案件类型生成对应的问答句"""
+
+        if case_type == "个人案件":
+            return [
+                "问：你是个人申请工伤认定吗？",
+                "答：是的，我是个人申请。",
+                "问：单位为什么没有为你申请？",
+                "答：单位说让我自己申请。",
+                # ... 更多个人案件专用问题
+            ]
+
+        elif case_type == "死亡案件":
+            return [
+                "问：你是死亡职工的家属吗？",
+                "答：是的，我是他的家属。",
+                "问：死亡时间和原因是什么？",
+                "答：...",
+                # ... 更多死亡案件专用问题
+            ]
+
+        elif case_type == "个人申请死亡案件":
+            return [
+                "问：你是以家属身份个人申请工亡吗？",
+                "答：是的。",
+                "问：单位没有为死者申报吗？",
+                "答：没有。",
+                # ... 综合问题
+            ]
+
+        else:  # 普通案件
+            return []  # 返回空列表
+
+    def create_legal_transcript(self, case_folder, data, legal_number, template_name):
         """生成法人笔录"""
         injured_name = data['受伤职工']
         legal_name = data['法人姓名']
@@ -734,15 +769,11 @@ class MainWindow(QMainWindow):
         filename = f"{injured_name}_法人{legal_number:02d}_{legal_name}.docx"
         filepath = os.path.join(case_folder, filename)
 
-        # 使用法人模板
-        template_path = os.path.join(os.path.dirname(__file__), "templates", "法人谈话笔录（普通工伤案件）.docx")
-
-        # 打印调试信息
-        print(f"模板路径: {template_path}")
-        print(f"文件是否存在: {os.path.exists(template_path)}")
+        # 使用传入的模板名
+        template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
 
         if not os.path.exists(template_path):
-            self.statusBar().showMessage("法人模板不存在", 3000)
+            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
             return False
 
         try:
@@ -769,12 +800,11 @@ class MainWindow(QMainWindow):
 
             doc.save(filepath)
             os.startfile(filepath)
-
+            self.update_case_index(data['案本号'], data['受伤职工'], data)
             self.statusBar().showMessage(f"法人笔录已生成: {filename}", 3000)
             return True
 
         except Exception as e:
-            print(f"生成法人笔录失败: {e}")
             self.statusBar().showMessage(f"生成失败: {str(e)}", 3000)
             return False
 
@@ -811,13 +841,46 @@ class MainWindow(QMainWindow):
 
         return cases
 
+    def generate_description(self, data):
+        """根据人员类型和单位情况生成描述语句"""
+        person_type = data['人员类型']  # 本人/证人/法人
+        has_employer = bool(data.get('用人单位', ''))
+        has_work_unit = bool(data.get('用工单位', ''))
+        has_workplace = bool(data.get('工作场所', ''))
+
+        # 获取姓名（根据人员类型不同，键名不同）
+        if person_type == "本人":
+            name = data.get('本人姓名', '')
+        elif person_type == "证人":
+            name = data.get('证人姓名', '')
+        else:  # 法人
+            name = data.get('法人姓名', '')
+
+        employer = data.get('用人单位', '')
+        work_unit = data.get('用工单位', '')
+        workplace = data.get('工作场所', '')
+        position = data.get(f'{person_type}岗位', '')
+
+        # 生成描述语句
+        if has_employer and has_work_unit and has_workplace:
+            description = f"我是{name}，系{employer}的职工，被指派到{work_unit}的{workplace}工作。从事{position}工作。"
+        elif has_employer and has_work_unit:
+            description = f"我是{name}，系{employer}的职工，被指派到{work_unit}工作。从事{position}工作。"
+        elif has_employer:
+            description = f"我是{name}，系{employer}的职工。从事{position}工作。"
+        else:
+            description = f"我是{name}。从事{position}工作。"
+
+        return description
+
     def show_case_selection_dialog(self, name, cases, id_card):
-        """显示案件选择对话框"""
+        """显示案件选择对话框（支持红色显示身份证不同的案件）"""
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QRadioButton, QButtonGroup, QPushButton, QHBoxLayout
+        from PyQt5.QtGui import QColor
 
         dialog = QDialog(self)
         dialog.setWindowTitle("发现同名案件")
-        dialog.resize(400, 300)
+        dialog.resize(450, 350)
 
         layout = QVBoxLayout()
 
@@ -826,7 +889,6 @@ class MainWindow(QMainWindow):
             title = f'发现与"{name}"(身份证:{id_card[-4:]})同名的案件:'
         else:
             title = f'发现与"{name}"同名的案件:'
-
         layout.addWidget(QLabel(title))
 
         # 创建单选按钮组
@@ -843,22 +905,34 @@ class MainWindow(QMainWindow):
         # 添加已有案件选项
         for i, case in enumerate(cases, 1):
             case_num = case['case_number']
-            case_id = case.get('id_card', '')
+            # 从 person_info 里取身份证
+            case_id = case.get('person_info', {}).get('id_card', '')
 
+            # 创建水平布局放单选按钮和文本
+            h_layout = QHBoxLayout()
+            radio = QRadioButton()
+            button_group.addButton(radio, i)
+            h_layout.addWidget(radio)
+
+            # 创建显示文本的标签
             if case_id:
-                # 显示身份证后4位
                 id_display = case_id[-4:] if len(case_id) >= 4 else case_id
                 text = f"{case_num} (身份证:{id_display})"
             else:
                 text = f"{case_num} (身份证:无)"
 
-            radio = QRadioButton(text)
-            button_group.addButton(radio, i)
-            layout.addWidget(radio)
+            label = QLabel(text)
+
+            # 如果输入的身份证和案件的身份证不同，设为红色
+            if id_card and case_id and id_card != case_id:
+                label.setStyleSheet("color: red;")
+
+            h_layout.addWidget(label)
+            h_layout.addStretch()
+            layout.addLayout(h_layout)
 
         # 按钮区域
         btn_layout = QHBoxLayout()
-
         btn_ok = QPushButton("确定")
         btn_cancel = QPushButton("取消")
 
@@ -879,36 +953,6 @@ class MainWindow(QMainWindow):
                 return cases[selected_id - 1]
 
         return None
-
-    def link_to_existing_case(self, selected_case, injured_name):
-        """关联到已有案件"""
-        case_number = selected_case['case_number']
-        year = selected_case['year']
-
-        # 构建案件文件夹路径
-        case_folder = os.path.join(os.path.dirname(__file__), str(year), case_number)
-
-        # 检查是否已有本人笔录
-        transcript_file = os.path.join(case_folder, f"{case_number}_笔录.docx")
-
-        if os.path.exists(transcript_file):
-            # 询问打开还是补充
-            choice = self.show_transcript_exists_dialog(case_number)
-
-            if choice == "open":
-                os.startfile(transcript_file)
-                return
-            elif choice == "supplement":
-                # 使用补充模板
-                template_name = "本人补充笔录.docx"
-            else:
-                return  # 用户取消
-        else:
-            # 没有笔录，用普通模板
-            template_name = "本人普通案件模板.docx"
-
-        # 继续生成笔录
-        self.generate_transcript(case_number, case_folder, template_name, injured_name)
 
     def show_transcript_exists_dialog(self, case_number):
         """显示已有笔录对话框"""
@@ -947,35 +991,39 @@ class MainWindow(QMainWindow):
         else:
             return "cancel"
 
-    def create_new_case(self, injured_name):
-        """创建新案件"""
-        case_number = self.generate_case_number(injured_name)
-        year_folder = self.get_current_year_folder()
-        case_folder = os.path.join(year_folder, case_number)
-        os.makedirs(case_folder, exist_ok=True)
-
-        # 更新索引文件
-        self.update_case_index(case_number, injured_name)
-
-        # 生成笔录
-        self.generate_transcript(case_number, case_folder, "本人普通案件模板.docx", injured_name)
-
     def collect_form_data(self):
         """收集当前表单所有数据"""
         id_card = self.lineEdit_id_card.text().strip()
         _, age, gender = self.calculate_id_info(id_card) if id_card else (None, None, None)
 
         # 获取人员类型作为前缀
-        prefix = self.check_person_type()  # "本人" / "证人" / "法人"
+        prefix = self.check_person_type()
+
+        # 获取条例选择
+        regulation_text = self.comboBox_regulations.currentText().strip()
+
+        # 简单的判断：如果ComboBox显示的是文件名，就视为空
+        employer = self.comboBox_employer.currentText().strip()
+        if employer == "用人单位名称汇总":
+            employer = ""
+
+        work_unit = self.comboBox_work_unit.currentText().strip()
+        if work_unit == "用工单位名称汇总":
+            work_unit = ""
+
+        workplace = self.comboBox_workplace.currentText().strip()
+        if workplace == "工作场所名称汇总":
+            workplace = ""
+
         data = {
             '案本号': '',
             '受伤职工': self.lineEdit_injured_worker.text().strip(),
-            '用人单位': self.comboBox_employer.currentText().strip(),
-            '用工单位': self.comboBox_work_unit.currentText().strip(),
-            '工作场所': self.comboBox_workplace.currentText().strip(),
+            '用人单位': employer,
+            '用工单位': work_unit,
+            '工作场所': workplace,
             '人员类型': prefix,
             '案件类型': self.check_case_type(),
-            '条例': self.comboBox_regulations.currentText(),
+            '条例': regulation_text,
             '操作员': self.lineEdit_operator.text().strip(),
             '当前日期': datetime.now().strftime('%Y年%m月%d日'),
             '当前时间': datetime.now().strftime('%H时%M分'),
@@ -995,6 +1043,7 @@ class MainWindow(QMainWindow):
 
     def generate_transcript(self, case_folder, template_name, data):
         """生成Word文档"""
+        # 打印完整的data字典，查看条例是否正确传递
         template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
 
         if not os.path.exists(template_path):
@@ -1021,38 +1070,129 @@ class MainWindow(QMainWindow):
         return True
 
     def update_case_index(self, case_number, person_name, data):
-        """更新案件索引"""
+        # 强制使用当前案本号（如果有）
+        if self.current_case_number:
+            case_number = self.current_case_number
+
         index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
 
+        # 获取当前案件类型前缀
+        person_type = data['人员类型']
+
+        # 基础信息
         case_data = {
             'case_number': case_number,
             'person_name': person_name,
-            'id_card': data['本人身份证号'],
             'case_type': data['案件类型'],
             'year': datetime.now().year,
             'folder_path': f"{datetime.now().year}/{case_number}",
             'created_date': datetime.now().strftime('%Y-%m-%d'),
-            'person_info': {
-                'name': data['本人姓名'],
-                'gender': data['本人性别'],
-                'age': data['本人年龄'],
-                'phone': data['本人电话']
-            }
+            'person_info': {},  # 本人信息
+            'witnesses': [],  # 证人列表
+            'legal_persons': []  # 法人列表
         }
+
+        # 如果当前是本人，存本人信息
+        if person_type == "本人":
+            case_data['person_info'] = {
+                'name': data.get('本人姓名', ''),
+                'gender': data.get('本人性别', ''),
+                'age': data.get('本人年龄', ''),
+                'phone': data.get('本人电话', ''),
+                'id_card': data.get('本人身份证号', ''),
+                'address': data.get('本人身份证地址', ''),
+                'current_address': data.get('本人现住址', ''),
+                'position': data.get('本人岗位', '')
+            }
+
+        # 如果当前是证人，添加到证人列表
+        elif person_type == "证人":
+            # 获取证人编号（需要从参数传入，或者从文件名计算）
+            # 这里简单处理：先用一个临时值
+            witness_number = 1  # 这里需要你传入真实的编号
+
+            witness_info = {
+                'name': data.get('证人姓名', ''),
+                'gender': data.get('证人性别', ''),
+                'age': data.get('证人年龄', ''),
+                'phone': data.get('证人电话', ''),
+                'id_card': data.get('证人身份证号', ''),
+                'address': data.get('证人身份证地址', ''),
+                'current_address': data.get('证人现住址', ''),
+                'position': data.get('证人岗位', ''),
+                'transcript_file': f"{person_name}_证人{witness_number:02d}_{data.get('证人姓名', '')}.docx"
+            }
+            case_data['witnesses'].append(witness_info)
+
+        # 如果当前是法人，添加到法人列表
+        elif person_type == "法人":
+            legal_info = {
+                'name': data.get('法人姓名', ''),
+                'gender': data.get('法人性别', ''),
+                'age': data.get('法人年龄', ''),
+                'phone': data.get('法人电话', ''),
+                'id_card': data.get('法人身份证号', ''),
+                'address': data.get('法人身份证地址', ''),
+                'current_address': data.get('法人现住址', ''),
+                'position': data.get('法人岗位', ''),
+                'transcript_file': f"{person_name}_法人??_{data.get('法人姓名', '')}.docx"
+            }
+            case_data['legal_persons'].append(legal_info)
 
         try:
             import json
 
+            # 读取现有索引
             if os.path.exists(index_file):
                 with open(index_file, 'r', encoding='utf-8') as f:
                     index_data = json.load(f)
             else:
                 index_data = {'cases': [], 'total_cases': 0, 'last_update': ''}
 
-            index_data['cases'].append(case_data)
+            # 查找是否已有这个案本号
+            found = False
+            for i, existing_case in enumerate(index_data['cases']):
+                if existing_case['case_number'] == case_number:
+                    # 更新现有记录
+                    found = True
+                    # 保留已有数据，只更新对应部分
+                    if person_type == "本人":
+                        index_data['cases'][i]['person_info'] = case_data['person_info']
+                    elif person_type == "证人":
+                        # 避免重复添加同一个证人
+                        witnesses = index_data['cases'][i].get('witnesses', [])
+                        # 简单去重：如果同名同身份证就不重复添加
+                        exists = False
+                        for w in witnesses:
+                            if w.get('name') == case_data['witnesses'][0]['name'] and \
+                                    w.get('id_card') == case_data['witnesses'][0]['id_card']:
+                                exists = True
+                                break
+                        if not exists:
+                            witnesses.append(case_data['witnesses'][0])
+                        index_data['cases'][i]['witnesses'] = witnesses
+                    elif person_type == "法人":
+                        legal_persons = index_data['cases'][i].get('legal_persons', [])
+                        exists = False
+                        for l in legal_persons:
+                            if l.get('name') == case_data['legal_persons'][0]['name'] and \
+                                    l.get('id_card') == case_data['legal_persons'][0]['id_card']:
+                                exists = True
+                                break
+                        if not exists:
+                            legal_persons.append(case_data['legal_persons'][0])
+                        index_data['cases'][i]['legal_persons'] = legal_persons
+                    break
+
+            # 如果是新案本，直接添加
+            if not found:
+                index_data['cases'].append(case_data)
+
+            # 更新统计信息
             index_data['total_cases'] = len(index_data['cases'])
             index_data['last_update'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+            # 保存
             with open(index_file, 'w', encoding='utf-8') as f:
                 json.dump(index_data, f, ensure_ascii=False, indent=2)
 
@@ -1189,6 +1329,30 @@ class MainWindow(QMainWindow):
         self.test_index = (self.test_index + 1) % len(test_data)
 
         self.statusBar().showMessage(f"已填入测试数据: {data['name']}", 2000)
+
+    def get_template_name(self, data):
+        """根据人员类型和条例返回对应的模板文件名"""
+        person_type = data['人员类型']  # 本人/证人/法人
+        regulation = data.get('条例', '')  # 获取条例
+
+        # 条例到文件名的映射
+        regulation_map = {
+            "第十四条第一款第一项（普通工伤案件）": "普通工伤案件",
+            "第十四条第一款第二项（预备收尾案件）": "预备收尾案件",
+            "第十四条第一款第三项（暴力伤害案件）": "暴力伤害案件",
+            "第十四条第一款第四项（患职业病案件）": "患职业病案件",
+            "第十四条第一款第五项（因工外出案件）": "因工外出案件",
+            "第十四条第一款第六项（上下班时案件）": "上下班时案件",
+            "第十五条第一款第一项（工作时因病亡故案件）": "工作时因病亡故案件",
+            # 可以继续添加其他映射
+        }
+
+        # 获取条例对应的案件类型，如果没有匹配则用"普通工伤案件"
+        case_type = regulation_map.get(regulation, "普通工伤案件")
+
+        # 生成模板名：人员类型 + 谈话笔录（ + 案件类型 + ）.docx
+        template_name = f"{person_type}谈话笔录（{case_type}）.docx"
+        return template_name
 
 
 def main():
