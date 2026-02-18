@@ -417,11 +417,11 @@ class MainWindow(QMainWindow):
             self.handle_legal_case(data)
 
     def handle_person_case(self, data):
-        # 1. 生成自我介绍
+        # 1. 生成自我介绍（仅用于显示）
         description = self.generate_description(data)
         print(description)
 
-        # 2. 根据案件类型生成问答句
+        # 2. 根据案件类型生成问答句（仅用于显示）
         case_type = data['案件类型']
         if case_type != "普通案件":
             questions = self.generate_case_questions(case_type, data)
@@ -429,7 +429,7 @@ class MainWindow(QMainWindow):
                 print(f"\n=== {case_type}问答句 ===")
                 for q in questions:
                     print(q)
-        """处理本人案件"""
+
         # ========== 检查是否已有案本 ==========
         import json
         index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
@@ -456,12 +456,11 @@ class MainWindow(QMainWindow):
                     # 用户选“新建” → 继续往下走新建逻辑
                     pass
                 elif selected_case:
-                    # 用户选了具体案本 → 关联并打开
-                    # 1. 把本人信息填到界面
+                    # 用户选了具体案本 → 关联
                     self.current_case_number = selected_case['case_number']
                     self.current_folder_path = selected_case['folder_path']
 
-                    # 1. 把本人信息填到界面
+                    # 把本人信息填到界面
                     person_info = selected_case.get('person_info', {})
                     self.lineEdit_name.setText(person_info.get('name', ''))
                     self.lineEdit_id_card.setText(selected_case.get('id_card', ''))
@@ -469,23 +468,22 @@ class MainWindow(QMainWindow):
                     if selected_case.get('id_card'):
                         self.auto_calculate_id_info()
 
-                    # 2. 检查是否有本人笔录文件
-                    case_folder = os.path.join(os.path.dirname(__file__), selected_case['folder_path'])
-                    transcript_file = os.path.join(case_folder, f"{selected_case['case_number']}_笔录.docx")
+                    self.statusBar().showMessage(f"已关联案本: {selected_case['case_number']}", 3000)
 
-                    if os.path.exists(transcript_file):
-                        os.startfile(transcript_file)
-                        self.statusBar().showMessage(f"已打开案本: {selected_case['case_number']}", 3000)
-                    else:
-                        self.statusBar().showMessage(f"该案本无本人笔录文件", 3000)
-
-                    return  # 结束，不新建
+                    # 死亡案件关联后直接提示输入证人
+                    if "死亡" in case_type:
+                        QMessageBox.information(self, "提示",
+                                                f"已关联死亡职工案本：{selected_case['case_number']}\n\n请继续输入证人笔录信息",
+                                                QMessageBox.Ok)
+                    return  # 结束
                 else:
                     return  # 用户取消对话框
 
-        # ========== 原有新建逻辑 ==========
+        # ========== 新建案件逻辑 ==========
         case_number = self.generate_case_number(data['受伤职工'])
         data['案本号'] = case_number
+
+        # 创建年度文件夹和案本文件夹
         year_folder = self.get_current_year_folder()
         case_folder = os.path.join(year_folder, case_number)
         os.makedirs(case_folder, exist_ok=True)
@@ -494,9 +492,19 @@ class MainWindow(QMainWindow):
         self.current_case_number = case_number
         self.current_folder_path = f"{datetime.now().year}/{case_number}"
 
+        # 更新索引（只保存本人信息，不生成Word文件）
         self.update_case_index(case_number, data['受伤职工'], data)
-        template_name = self.get_template_name(data)
-        self.generate_transcript(case_folder, template_name, data)
+
+        # 判断是否为死亡案件
+        if "死亡" in case_type:  # 如果是死亡案件（包括"死亡案件"和"个人申请死亡案件"）
+            # 不生成Word文件，只提示输入证人笔录
+            QMessageBox.information(self, "提示",
+                                    f"死亡职工信息已保存\n案本号：{case_number}\n\n请继续输入证人笔录信息\n\n注意：死亡案件不生成本人笔录文件",
+                                    QMessageBox.Ok)
+        else:
+            # 非死亡案件，正常生成笔录
+            template_name = self.get_template_name(data)
+            self.generate_transcript(case_folder, template_name, data)
 
     def handle_witness_case(self, data):
         # 1. 生成自我介绍
@@ -624,6 +632,9 @@ class MainWindow(QMainWindow):
                 if f"{{{key}}}" in text:
                     text = text.replace(f"{{{key}}}", value)
             paragraph.text = text
+
+            # ===== 在这里插入问答句 =====
+        doc = self.add_questions_to_doc(doc, data)
 
         doc.save(filepath)
         os.startfile(filepath)
@@ -798,6 +809,9 @@ class MainWindow(QMainWindow):
                         text = text.replace(f"{{{key}}}", value)
                 paragraph.text = text
 
+                # ===== 在这里插入问答句 =====
+            doc = self.add_questions_to_doc(doc, data)
+
             doc.save(filepath)
             os.startfile(filepath)
             self.update_case_index(data['案本号'], data['受伤职工'], data)
@@ -871,7 +885,7 @@ class MainWindow(QMainWindow):
         else:
             description = f"我是{name}。从事{position}工作。"
 
-        return description
+        return f"答：{description}"
 
     def show_case_selection_dialog(self, name, cases, id_card):
         """显示案件选择对话框（支持红色显示身份证不同的案件）"""
@@ -1043,7 +1057,6 @@ class MainWindow(QMainWindow):
 
     def generate_transcript(self, case_folder, template_name, data):
         """生成Word文档"""
-        # 打印完整的data字典，查看条例是否正确传递
         template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
 
         if not os.path.exists(template_path):
@@ -1053,21 +1066,37 @@ class MainWindow(QMainWindow):
         from docx import Document
         doc = Document(template_path)
 
+        # ===== 在这里插入自我介绍 =====
+        doc = self.insert_description_into_doc(doc, data)
+        # ============================
+
         # 替换占位符
         for paragraph in doc.paragraphs:
             text = paragraph.text
             for key, value in data.items():
                 if f"{{{key}}}" in text:
-                    text = text.replace(f"{{{key}}}", value)
+                    text = text.replace(f"{{{key}}}", str(value))
             paragraph.text = text
+
+            # ===== 在这里插入问答句 =====
+        doc = self.add_questions_to_doc(doc, data)
 
         # 保存文件
         doc_file = os.path.join(case_folder, f"{data['案本号']}_笔录.docx")
         doc.save(doc_file)
         os.startfile(doc_file)
-
-        self.statusBar().showMessage(f"笔录生成完成: {data['案本号']}", 3000)
         return True
+
+    def add_questions_to_doc(self, doc, data):
+        """将案件类型问答句添加到文档中"""
+        case_type = data['案件类型']
+        if case_type != "普通案件":
+            questions = self.generate_case_questions(case_type, data)
+            if questions:
+                doc.add_paragraph()  # 空行
+                for q in questions:
+                    doc.add_paragraph(q)
+        return doc
 
     def update_case_index(self, case_number, person_name, data):
         # 强制使用当前案本号（如果有）
@@ -1259,6 +1288,23 @@ class MainWindow(QMainWindow):
         settings.setValue("geometry", self.saveGeometry())
 
         event.accept()
+
+    def insert_description_into_doc(self, doc, data):
+        """将自我介绍插入到文档中（在指定问题后面插入）"""
+        description = self.generate_description(data)
+
+        # 查找目标段落
+        for i, paragraph in enumerate(doc.paragraphs):
+            if "问：请介绍一下你的姓名" in paragraph.text:
+                # 如果后面还有段落，在下一个段落前面插入
+                if i < len(doc.paragraphs) - 1:
+                    doc.paragraphs[i + 1].insert_paragraph_before(description)
+                else:
+                    # 如果是最后一个段落，直接在末尾添加
+                    doc.add_paragraph(description)
+                break
+
+        return doc
 
     # 以下是测试程序，编程完成以后需要删除
     def keyPressEvent(self, event):
