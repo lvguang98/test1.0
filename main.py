@@ -25,6 +25,9 @@ class MainWindow(QMainWindow):
         # 2. 初始化配置管理器
         self.config = ConfigManager()
 
+        self.BASE_DIR = os.path.dirname(__file__)
+        self.TEMPLATE_DIR = os.path.join(self.BASE_DIR, "templates")
+
         # 3. 加载Excel数据到ComboBox
         self.load_excel_to_combobox()
 
@@ -86,7 +89,7 @@ class MainWindow(QMainWindow):
             from datetime import datetime
 
             # 读取索引文件
-            index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
+            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
             with open(index_file, 'r', encoding='utf-8') as f:
                 index_data = json.load(f)
 
@@ -102,7 +105,7 @@ class MainWindow(QMainWindow):
                 return
 
             # 获取模板
-            template_path = os.path.join(os.path.dirname(__file__), "templates", "工伤案件审批表（模板）.docx")
+            template_path = os.path.join(self.BASE_DIR, "templates", "工伤案件审批表（模板）.docx")
             if not os.path.exists(template_path):
                 QMessageBox.warning(self, "错误", "模板不存在")
                 return
@@ -149,7 +152,7 @@ class MainWindow(QMainWindow):
                                     paragraph.text = paragraph.text.replace(key, value)
 
             # 保存并打开
-            case_folder = os.path.join(os.path.dirname(__file__), case_data.get('folder_path', ''))
+            case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
             filename = f"{self.current_case_number}_案件审批表.docx"
             filepath = os.path.join(case_folder, filename)
 
@@ -566,7 +569,7 @@ class MainWindow(QMainWindow):
 
         # ========== 检查是否已有案本 ==========
         import json
-        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
 
         if os.path.exists(index_file):
             with open(index_file, 'r', encoding='utf-8') as f:
@@ -735,13 +738,10 @@ class MainWindow(QMainWindow):
         injured_name = data['受伤职工']
         witness_name = data['证人姓名']
 
-        # 生成文件名：受伤职工姓名_证人XX_证人姓名.docx
         filename = f"{injured_name}_证人{witness_number:02d}_{witness_name}.docx"
         filepath = os.path.join(case_folder, filename)
 
-        # 使用传入的模板名
-        template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
-
+        template_path = os.path.join(self.TEMPLATE_DIR, template_name)
         if not os.path.exists(template_path):
             self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
             return False
@@ -749,28 +749,36 @@ class MainWindow(QMainWindow):
         from docx import Document
         doc = Document(template_path)
 
-        # 替换占位符
+        # 准备替换数据（保持原有数据）
         placeholders = {
             '受伤职工': injured_name,
             '证人姓名': witness_name,
+            '证人性别': data.get('证人性别', ''),
+            '证人年龄': data.get('证人年龄', ''),
             '证人身份证': data.get('证人身份证号', ''),
+            '证人身份证地址': data.get('证人身份证地址', ''),
             '证人电话': data.get('证人电话', ''),
+            '证人岗位': data.get('证人岗位', ''),
+            '用人单位': data.get('用人单位', ''),
+            '操作员': data.get('操作员', ''),
             '当前日期': datetime.now().strftime('%Y年%m月%d日'),
             '当前时间': datetime.now().strftime('%H时%M分'),
         }
 
+        # ✅ 改成和本人笔录一样的替换逻辑
         for paragraph in doc.paragraphs:
             text = paragraph.text
             for key, value in placeholders.items():
-                if f"{{{key}}}" in text:
-                    text = text.replace(f"{{{key}}}", value)
+                if f"{{{key}}}" in text:  # 查找带花括号的 {key}
+                    text = text.replace(f"{{{key}}}", str(value))
             paragraph.text = text
 
-            # ===== 在这里插入问答句 =====
+        # 插入问答句
         doc = self.add_questions_to_doc(doc, data)
 
         doc.save(filepath)
         os.startfile(filepath)
+
         self.update_case_index(data['案本号'], data['受伤职工'], data)
         self.statusBar().showMessage(f"证人笔录已生成: {filename}", 3000)
         return True
@@ -905,17 +913,15 @@ class MainWindow(QMainWindow):
             return []  # 返回空列表
 
     def create_legal_transcript(self, case_folder, data, legal_number, template_name):
-        """生成法人笔录"""
+        """生成法人笔录（统一替换逻辑）"""
         injured_name = data['受伤职工']
         legal_name = data['法人姓名']
 
-        # 生成文件名：受伤职工姓名_法人XX_法人姓名.docx
+        # 生成文件名
         filename = f"{injured_name}_法人{legal_number:02d}_{legal_name}.docx"
         filepath = os.path.join(case_folder, filename)
 
-        # 使用传入的模板名
-        template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
-
+        template_path = os.path.join(self.TEMPLATE_DIR, template_name)
         if not os.path.exists(template_path):
             self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
             return False
@@ -924,30 +930,41 @@ class MainWindow(QMainWindow):
             from docx import Document
             doc = Document(template_path)
 
-            # 替换占位符
+            # ✅ 准备替换数据（和证人一样的格式）
             placeholders = {
                 '受伤职工': injured_name,
                 '法人姓名': legal_name,
+                '法人性别': data.get('法人性别', ''),
+                '法人年龄': data.get('法人年龄', ''),
                 '法人身份证': data.get('法人身份证号', ''),
+                '法人身份证地址': data.get('法人身份证地址', ''),
                 '法人电话': data.get('法人电话', ''),
                 '法人岗位': data.get('法人岗位', ''),
+                '用人单位': data.get('用人单位', ''),
+                '用工单位': data.get('用工单位', ''),
+                '工作场所': data.get('工作场所', ''),
+                '操作员': data.get('操作员', ''),
                 '当前日期': datetime.now().strftime('%Y年%m月%d日'),
                 '当前时间': datetime.now().strftime('%H时%M分'),
             }
 
+            # ✅ 统一替换逻辑（带花括号查找）
             for paragraph in doc.paragraphs:
                 text = paragraph.text
                 for key, value in placeholders.items():
                     if f"{{{key}}}" in text:
-                        text = text.replace(f"{{{key}}}", value)
+                        text = text.replace(f"{{{key}}}", str(value))
                 paragraph.text = text
 
-                # ===== 在这里插入问答句 =====
+            # 插入问答句
             doc = self.add_questions_to_doc(doc, data)
 
             doc.save(filepath)
             os.startfile(filepath)
+
+            # 更新索引
             self.update_case_index(data['案本号'], data['受伤职工'], data)
+
             self.statusBar().showMessage(f"法人笔录已生成: {filename}", 3000)
             return True
 
@@ -960,7 +977,7 @@ class MainWindow(QMainWindow):
         cases = []
 
         # 读取索引文件
-        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
 
         if os.path.exists(index_file):
             try:
@@ -1190,7 +1207,7 @@ class MainWindow(QMainWindow):
 
     def generate_transcript(self, case_folder, template_name, data):
         """生成Word文档"""
-        template_path = os.path.join(os.path.dirname(__file__), "templates", template_name)
+        template_path = os.path.join(self.BASE_DIR, "templates", template_name)
 
         if not os.path.exists(template_path):
             self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
@@ -1290,7 +1307,7 @@ class MainWindow(QMainWindow):
 
     def update_extracted_info_in_index(self, case_number, extracted_info):
         """只更新受伤经过、就医情况、医疗结论三个字段"""
-        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
 
         try:
             import json
@@ -1313,7 +1330,7 @@ class MainWindow(QMainWindow):
 
     def update_person_info_in_index(self, case_number, extracted_info):
         """在索引文件中更新本人的额外信息"""
-        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
 
         try:
             import json
@@ -1364,70 +1381,118 @@ class MainWindow(QMainWindow):
         return doc
 
     def update_case_index(self, case_number, person_name, data):
-        index_file = os.path.join(os.path.dirname(__file__), "cases_index.json")
-
-        case_data = {
-            'case_number': case_number,
-            'person_name': person_name,
-            'case_type': data['案件类型'],
-            'year': datetime.now().year,
-            'folder_path': f"{datetime.now().year}/{case_number}",
-            'created_date': datetime.now().strftime('%Y-%m-%d'),
-            'employer': data.get('用人单位', ''),
-            'work_unit': data.get('用工单位', ''),
-            'workplace': data.get('工作场所', ''),
-            'regulation': data.get('条例', ''),
-            'operator': data.get('操作员', ''),
-            'person_info': {
-                'name': data.get('本人姓名', ''),
-                'gender': data.get('本人性别', ''),
-                'age': data.get('本人年龄', ''),
-                'phone': data.get('本人电话', ''),
-                'id_card': data.get('本人身份证号', ''),
-                'address': data.get('本人身份证地址', ''),
-                'current_address': data.get('本人现住址', ''),
-                'position': data.get('本人岗位', ''),
-                '自我介绍': data.get('自我介绍', ''),
-                '受伤经过': data.get('受伤经过', ''),
-                '就医情况': data.get('就医情况', ''),
-                '医疗结论': data.get('医疗结论', '')
-            },
-            'witnesses': [],
-            'legal_persons': []
-        }
+        """更新案件索引文件（合并数据，避免覆盖）"""
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
 
         try:
             import json
+            import shutil
+            from datetime import datetime
+
+            # 读取现有索引
             if os.path.exists(index_file):
                 with open(index_file, 'r', encoding='utf-8') as f:
                     index_data = json.load(f)
             else:
                 index_data = {'cases': [], 'total_cases': 0, 'last_update': ''}
 
-            # 查找并更新
+            # 查找现有案件
             found = False
             for i, existing_case in enumerate(index_data['cases']):
                 if existing_case['case_number'] == case_number:
-                    index_data['cases'][i] = case_data
+                    # 获取现有的 person_info
+                    existing_person_info = existing_case.get('person_info', {})
+
+                    # 构建新的 person_info（保留旧数据，用新数据覆盖）
+                    new_person_info = {
+                        'name': data.get('本人姓名', existing_person_info.get('name', '')),
+                        'gender': data.get('本人性别', existing_person_info.get('gender', '')),
+                        'age': data.get('本人年龄', existing_person_info.get('age', '')),
+                        'phone': data.get('本人电话', existing_person_info.get('phone', '')),
+                        'id_card': data.get('本人身份证号', existing_person_info.get('id_card', '')),
+                        'address': data.get('本人身份证地址', existing_person_info.get('address', '')),
+                        'current_address': data.get('本人现住址', existing_person_info.get('current_address', '')),
+                        'position': data.get('本人岗位', existing_person_info.get('position', '')),
+                        '自我介绍': data.get('自我介绍', existing_person_info.get('自我介绍', '')),
+                        '受伤经过': data.get('受伤经过', existing_person_info.get('受伤经过', '')),
+                        '就医情况': data.get('就医情况', existing_person_info.get('就医情况', '')),
+                        '医疗结论': data.get('医疗结论', existing_person_info.get('医疗结论', ''))
+                    }
+
+                    # 构建完整的案件数据（保留所有现有字段）
+                    index_data['cases'][i] = {
+                        'case_number': case_number,
+                        'person_name': person_name,
+                        'case_type': data.get('案件类型', existing_case.get('case_type', '')),
+                        'year': datetime.now().year,
+                        'folder_path': existing_case.get('folder_path', f"{datetime.now().year}/{case_number}"),
+                        'created_date': existing_case.get('created_date', datetime.now().strftime('%Y-%m-%d')),
+                        'employer': data.get('用人单位', existing_case.get('employer', '')),
+                        'work_unit': data.get('用工单位', existing_case.get('work_unit', '')),
+                        'workplace': data.get('工作场所', existing_case.get('workplace', '')),
+                        'regulation': data.get('条例', existing_case.get('regulation', '')),
+                        'operator': data.get('操作员', existing_case.get('operator', '')),
+                        'person_info': new_person_info,
+                        'witnesses': existing_case.get('witnesses', []),  # 保留现有证人
+                        'legal_persons': existing_case.get('legal_persons', [])  # 保留现有法人
+                    }
                     found = True
                     break
 
             if not found:
+                # 新建案件（没有现有数据）
+                case_data = {
+                    'case_number': case_number,
+                    'person_name': person_name,
+                    'case_type': data.get('案件类型', ''),
+                    'year': datetime.now().year,
+                    'folder_path': f"{datetime.now().year}/{case_number}",
+                    'created_date': datetime.now().strftime('%Y-%m-%d'),
+                    'employer': data.get('用人单位', ''),
+                    'work_unit': data.get('用工单位', ''),
+                    'workplace': data.get('工作场所', ''),
+                    'regulation': data.get('条例', ''),
+                    'operator': data.get('操作员', ''),
+                    'person_info': {
+                        'name': data.get('本人姓名', ''),
+                        'gender': data.get('本人性别', ''),
+                        'age': data.get('本人年龄', ''),
+                        'phone': data.get('本人电话', ''),
+                        'id_card': data.get('本人身份证号', ''),
+                        'address': data.get('本人身份证地址', ''),
+                        'current_address': data.get('本人现住址', ''),
+                        'position': data.get('本人岗位', ''),
+                        '自我介绍': data.get('自我介绍', ''),
+                        '受伤经过': data.get('受伤经过', ''),
+                        '就医情况': data.get('就医情况', ''),
+                        '医疗结论': data.get('医疗结论', '')
+                    },
+                    'witnesses': [],
+                    'legal_persons': []
+                }
                 index_data['cases'].append(case_data)
 
+            # 更新统计信息
             index_data['total_cases'] = len(index_data['cases'])
             index_data['last_update'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            with open(index_file, 'w', encoding='utf-8') as f:
+            # 先写临时文件，再替换（防止文件损坏）
+            temp_file = index_file + ".tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(index_data, f, ensure_ascii=False, indent=2)
+
+            # 替换原文件
+            shutil.move(temp_file, index_file)
 
         except Exception as e:
             print(f"更新索引失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def get_current_year_folder(self):
         """获取当前年份的cases文件夹"""
         current_year = datetime.now().year
-        year_folder = os.path.join(os.path.dirname(__file__), str(current_year))
+        year_folder = os.path.join(self.BASE_DIR, str(current_year))
         os.makedirs(year_folder, exist_ok=True)
         return year_folder
 
