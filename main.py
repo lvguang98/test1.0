@@ -858,16 +858,11 @@ class MainWindow(QMainWindow):
     def generate_transcript_unified(self, case_folder, data, template_name, file_prefix, person_type, person_name):
         """
         统一的笔录生成方法（使用占位符替换）
-        :param case_folder: 案件文件夹路径
-        :param data: 表单数据
-        :param template_name: 模板文件名
-        :param file_prefix: 文件前缀（如"证人"、"法人"）
-        :param person_type: 人员类型（用于占位符前缀）
-        :param person_name: 人员姓名
-        :return: 生成的文件路径
         """
         try:
             from docx import Document
+            import threading
+            import time
 
             template_path = os.path.join(self.TEMPLATE_DIR, template_name)
             if not os.path.exists(template_path):
@@ -887,10 +882,10 @@ class MainWindow(QMainWindow):
                 '当前日期': datetime.now().strftime('%Y年%m月%d日'),
                 '当前时间': datetime.now().strftime('%H时%M分'),
 
-                # 自我介绍（由generate_description生成）
-                '自我介绍': self.generate_description(data),  # ← 直接在这里生成
+                # 自我介绍
+                '自我介绍': self.generate_description(data),
 
-                # 人员特定信息（使用传入的person_type作为前缀）
+                # 人员特定信息
                 f'{person_type}姓名': person_name,
                 f'{person_type}性别': data.get(f'{person_type}性别', ''),
                 f'{person_type}年龄': data.get(f'{person_type}年龄', ''),
@@ -900,7 +895,7 @@ class MainWindow(QMainWindow):
                 f'{person_type}岗位': data.get(f'{person_type}岗位', ''),
             }
 
-            # 2. 替换所有占位符（包括自我介绍）
+            # 2. 替换所有占位符
             for paragraph in doc.paragraphs:
                 text = paragraph.text
                 for key, value in placeholders.items():
@@ -921,12 +916,11 @@ class MainWindow(QMainWindow):
                                     text = text.replace(placeholder, str(value))
                             paragraph.text = text
 
-            # 4. 插入案件问答句（如果有）
+            # 4. 插入案件问答句
             doc = self.add_questions_to_doc(doc, data)
 
             # 5. 生成文件名并保存
             injured_name = data.get('受伤职工', '')
-            # 查找当前最大编号
             import re
             max_num = 0
             if os.path.exists(case_folder):
@@ -950,6 +944,30 @@ class MainWindow(QMainWindow):
 
             # 更新索引
             self.update_case_index(data['案本号'], data['受伤职工'], data)
+
+            # ===== 新增：如果是本人笔录，启动后台线程监控文件关闭 =====
+            if person_type == "本人":
+                def wait_for_file_close():
+                    """等待文件关闭后自动提取信息"""
+                    time.sleep(2)  # 给Word一点启动时间
+
+                    # 等待文件关闭（尝试以写入模式打开，如果失败说明文件还在使用中）
+                    file_closed = False
+                    while not file_closed:
+                        try:
+                            # 尝试以追加模式打开，如果成功说明文件已关闭
+                            with open(filepath, 'a'):
+                                pass
+                            file_closed = True
+                        except:
+                            # 文件还在使用中，等待1秒后重试
+                            time.sleep(1)
+
+                    # 文件已关闭，提取信息
+                    self.extract_person_info_from_doc(filepath, data['案本号'])
+
+                # 启动后台线程
+                threading.Thread(target=wait_for_file_close, daemon=True).start()
 
             return filepath
 
@@ -1050,6 +1068,8 @@ class MainWindow(QMainWindow):
             description = f"我是{name}，系{employer}的职工，被指派到{work_unit}的{workplace}工作。从事{position}工作。"
         elif has_employer and has_work_unit:
             description = f"我是{name}，系{employer}的职工，被指派到{work_unit}工作。从事{position}工作。"
+        elif has_employer and has_workplace:
+            description = f"我是{name}，系{employer}的职工，被指派到{workplace}工作。从事{position}工作。"
         elif has_employer:
             description = f"我是{name}，系{employer}的职工。从事{position}工作。"
         else:
