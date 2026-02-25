@@ -643,9 +643,10 @@ class MainWindow(QMainWindow):
             self.generate_transcript(case_folder, template_name, data)
 
     def handle_witness_case(self, data):
-        # 1. 生成自我介绍
+        # 1. 生成自我介绍并保存到data
         description = self.generate_description(data)
         print(description)
+        data['自我介绍'] = description  # ← 添加这行，保存自我介绍
 
         # 2. 根据案件类型生成问答句
         case_type = data['案件类型']
@@ -655,13 +656,13 @@ class MainWindow(QMainWindow):
                 print(f"\n=== {case_type}问答句（证人版）===")
                 for q in questions:
                     print(q)
-        """处理证人案件"""
+
         # ===== 强制检查是否有当前案本号 =====
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
-        witness_name = data.get('证人姓名', '')  # ← 添加这一行
+        witness_name = data.get('证人姓名', '')
         # 直接使用保存的案本信息
         case_number = self.current_case_number
         data['案本号'] = case_number
@@ -682,14 +683,11 @@ class MainWindow(QMainWindow):
 
         if not witness_files:
             # ========== 情况2.1：没有证人笔录，直接生成第一个 ==========
-            template_name = self.get_template_name(data)  # ← 加这行
+            template_name = self.get_template_name(data)
             self.create_witness_transcript(case_folder, data, witness_number=1, template_name=template_name)
             return
 
         # ========== 情况2.2：已有证人笔录，检查是否同一证人 ==========
-        # 这里简化处理：遍历所有证人文件，看是否已有当前证人
-        # 实际项目中可能需要读取文件内容比对身份证
-
         import re
         witness_exists = False
         max_number = 0
@@ -697,7 +695,6 @@ class MainWindow(QMainWindow):
 
         for file in witness_files:
             # 文件名格式：受伤职工姓名_证人XX_证人姓名.docx
-            # 例如：张三_证人01_李四.docx
             match = re.search(r'证人(\d+)_(.+?)\.docx', file)
             if match:
                 num = int(match.group(1))
@@ -719,74 +716,49 @@ class MainWindow(QMainWindow):
             )
 
             if reply == QMessageBox.Yes:
-                os.startfile(existing_file)
-                self.statusBar().showMessage(f"已打开证人笔录", 3000)
+                if existing_file and os.path.exists(existing_file):
+                    os.startfile(existing_file)
+                    self.statusBar().showMessage(f"已打开证人笔录", 3000)
+                else:
+                    QMessageBox.warning(self, "错误", "找不到证人笔录文件")
             else:
                 # 新建另一份（编号+1）
-                template_name = self.get_template_name(data)  # ← 加这行
+                template_name = self.get_template_name(data)
                 self.create_witness_transcript(case_folder, data, witness_number=max_number + 1,
                                                template_name=template_name)
         else:
             # ========== 情况2.2.2：新证人，直接生成 ==========
-            template_name = self.get_template_name(data)  # ← 加这行
+            template_name = self.get_template_name(data)
             self.create_witness_transcript(case_folder, data, witness_number=max_number + 1,
                                            template_name=template_name)
 
-    # 和证人方法同一个范围的的方法，可能有补充和调整
     def create_witness_transcript(self, case_folder, data, witness_number, template_name):
         """生成证人笔录"""
-        injured_name = data['受伤职工']
-        witness_name = data['证人姓名']
+        return self.generate_transcript_unified(
+            case_folder=case_folder,
+            data=data,
+            template_name=template_name,
+            file_prefix="证人",
+            person_type="证人",
+            person_name=data.get('证人姓名', '')
+        )
 
-        filename = f"{injured_name}_证人{witness_number:02d}_{witness_name}.docx"
-        filepath = os.path.join(case_folder, filename)
-
-        template_path = os.path.join(self.TEMPLATE_DIR, template_name)
-        if not os.path.exists(template_path):
-            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
-            return False
-
-        from docx import Document
-        doc = Document(template_path)
-
-        # 准备替换数据（保持原有数据）
-        placeholders = {
-            '受伤职工': injured_name,
-            '证人姓名': witness_name,
-            '证人性别': data.get('证人性别', ''),
-            '证人年龄': data.get('证人年龄', ''),
-            '证人身份证': data.get('证人身份证号', ''),
-            '证人身份证地址': data.get('证人身份证地址', ''),
-            '证人电话': data.get('证人电话', ''),
-            '证人岗位': data.get('证人岗位', ''),
-            '用人单位': data.get('用人单位', ''),
-            '操作员': data.get('操作员', ''),
-            '当前日期': datetime.now().strftime('%Y年%m月%d日'),
-            '当前时间': datetime.now().strftime('%H时%M分'),
-        }
-
-        # ✅ 改成和本人笔录一样的替换逻辑
-        for paragraph in doc.paragraphs:
-            text = paragraph.text
-            for key, value in placeholders.items():
-                if f"{{{key}}}" in text:  # 查找带花括号的 {key}
-                    text = text.replace(f"{{{key}}}", str(value))
-            paragraph.text = text
-
-        # 插入问答句
-        doc = self.add_questions_to_doc(doc, data)
-
-        doc.save(filepath)
-        os.startfile(filepath)
-
-        self.update_case_index(data['案本号'], data['受伤职工'], data)
-        self.statusBar().showMessage(f"证人笔录已生成: {filename}", 3000)
-        return True
+    def create_legal_transcript(self, case_folder, data, legal_number, template_name):
+        """生成法人笔录"""
+        return self.generate_transcript_unified(
+            case_folder=case_folder,
+            data=data,
+            template_name=template_name,
+            file_prefix="法人",
+            person_type="法人",
+            person_name=data.get('法人姓名', '')
+        )
 
     def handle_legal_case(self, data):
-        # 1. 生成自我介绍
+        # 1. 生成自我介绍并保存到data
         description = self.generate_description(data)
         print(description)
+        data['自我介绍'] = description  # ← 添加这行，保存自我介绍
 
         # 2. 根据案件类型生成问答句
         case_type = data['案件类型']
@@ -796,7 +768,7 @@ class MainWindow(QMainWindow):
                 print(f"\n=== {case_type}问答句（法人版）===")
                 for q in questions:
                     print(q)
-        """处理法人案件"""
+
         # ===== 强制检查是否有当前案本号 =====
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
@@ -826,7 +798,7 @@ class MainWindow(QMainWindow):
 
             if not legal_files:
                 # ===== 没有法人笔录，直接生成第一个 =====
-                template_name = self.get_template_name(data)  # ← 加这行
+                template_name = self.get_template_name(data)
                 self.create_legal_transcript(case_folder, data, legal_number=1, template_name=template_name)
                 return
 
@@ -834,6 +806,7 @@ class MainWindow(QMainWindow):
             import re
             legal_exists = False
             max_number = 0
+            existing_file = None
 
             for file in legal_files:
                 # 文件名格式：受伤职工姓名_法人XX_法人姓名.docx
@@ -858,16 +831,19 @@ class MainWindow(QMainWindow):
                 )
 
                 if reply == QMessageBox.Yes:
-                    os.startfile(existing_file)
-                    self.statusBar().showMessage(f"已打开法人笔录", 3000)
+                    if existing_file and os.path.exists(existing_file):
+                        os.startfile(existing_file)
+                        self.statusBar().showMessage(f"已打开法人笔录", 3000)
+                    else:
+                        QMessageBox.warning(self, "错误", "找不到法人笔录文件")
                 else:
                     # 新建另一份（编号+1）
-                    template_name = self.get_template_name(data)  # ← 加这行
+                    template_name = self.get_template_name(data)
                     self.create_legal_transcript(case_folder, data, legal_number=max_number + 1,
                                                  template_name=template_name)
             else:
                 # ===== 新法人，直接生成 =====
-                template_name = self.get_template_name(data)  # ← 加这行
+                template_name = self.get_template_name(data)
                 self.create_legal_transcript(case_folder, data, legal_number=max_number + 1,
                                              template_name=template_name)
 
@@ -878,6 +854,110 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             print("=" * 50)
             self.statusBar().showMessage(f"错误: {str(e)}", 3000)
+
+    def generate_transcript_unified(self, case_folder, data, template_name, file_prefix, person_type, person_name):
+        """
+        统一的笔录生成方法（使用占位符替换）
+        :param case_folder: 案件文件夹路径
+        :param data: 表单数据
+        :param template_name: 模板文件名
+        :param file_prefix: 文件前缀（如"证人"、"法人"）
+        :param person_type: 人员类型（用于占位符前缀）
+        :param person_name: 人员姓名
+        :return: 生成的文件路径
+        """
+        try:
+            from docx import Document
+
+            template_path = os.path.join(self.TEMPLATE_DIR, template_name)
+            if not os.path.exists(template_path):
+                self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
+                return None
+
+            doc = Document(template_path)
+
+            # 1. 准备所有替换数据
+            placeholders = {
+                # 基本信息
+                '受伤职工': data.get('受伤职工', ''),
+                '用人单位': data.get('用人单位', ''),
+                '用工单位': data.get('用工单位', ''),
+                '工作场所': data.get('工作场所', ''),
+                '操作员': data.get('操作员', ''),
+                '当前日期': datetime.now().strftime('%Y年%m月%d日'),
+                '当前时间': datetime.now().strftime('%H时%M分'),
+
+                # 自我介绍（由generate_description生成）
+                '自我介绍': self.generate_description(data),  # ← 直接在这里生成
+
+                # 人员特定信息（使用传入的person_type作为前缀）
+                f'{person_type}姓名': person_name,
+                f'{person_type}性别': data.get(f'{person_type}性别', ''),
+                f'{person_type}年龄': data.get(f'{person_type}年龄', ''),
+                f'{person_type}身份证': data.get(f'{person_type}身份证号', ''),
+                f'{person_type}身份证地址': data.get(f'{person_type}身份证地址', ''),
+                f'{person_type}电话': data.get(f'{person_type}电话', ''),
+                f'{person_type}岗位': data.get(f'{person_type}岗位', ''),
+            }
+
+            # 2. 替换所有占位符（包括自我介绍）
+            for paragraph in doc.paragraphs:
+                text = paragraph.text
+                for key, value in placeholders.items():
+                    placeholder = f"{{{key}}}"
+                    if placeholder in text:
+                        text = text.replace(placeholder, str(value))
+                paragraph.text = text
+
+            # 3. 替换表格中的占位符
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            text = paragraph.text
+                            for key, value in placeholders.items():
+                                placeholder = f"{{{key}}}"
+                                if placeholder in text:
+                                    text = text.replace(placeholder, str(value))
+                            paragraph.text = text
+
+            # 4. 插入案件问答句（如果有）
+            doc = self.add_questions_to_doc(doc, data)
+
+            # 5. 生成文件名并保存
+            injured_name = data.get('受伤职工', '')
+            # 查找当前最大编号
+            import re
+            max_num = 0
+            if os.path.exists(case_folder):
+                for file in os.listdir(case_folder):
+                    pattern = rf'{injured_name}_{file_prefix}(\d+)_'
+                    match = re.search(pattern, file)
+                    if match:
+                        num = int(match.group(1))
+                        max_num = max(max_num, num)
+
+            next_num = max_num + 1
+            filename = f"{injured_name}_{file_prefix}{next_num:02d}_{person_name}.docx"
+            filepath = os.path.join(case_folder, filename)
+
+            doc.save(filepath)
+
+            # 打开文件
+            os.startfile(filepath)
+
+            self.statusBar().showMessage(f"{person_type}笔录已生成: {filename}", 3000)
+
+            # 更新索引
+            self.update_case_index(data['案本号'], data['受伤职工'], data)
+
+            return filepath
+
+        except Exception as e:
+            self.statusBar().showMessage(f"生成失败: {str(e)}", 3000)
+            import traceback
+            traceback.print_exc()
+            return None
 
     def generate_case_questions(self, case_type, data):
         """根据案件类型生成对应的问答句"""
@@ -911,66 +991,6 @@ class MainWindow(QMainWindow):
 
         else:  # 普通案件
             return []  # 返回空列表
-
-    def create_legal_transcript(self, case_folder, data, legal_number, template_name):
-        """生成法人笔录（统一替换逻辑）"""
-        injured_name = data['受伤职工']
-        legal_name = data['法人姓名']
-
-        # 生成文件名
-        filename = f"{injured_name}_法人{legal_number:02d}_{legal_name}.docx"
-        filepath = os.path.join(case_folder, filename)
-
-        template_path = os.path.join(self.TEMPLATE_DIR, template_name)
-        if not os.path.exists(template_path):
-            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
-            return False
-
-        try:
-            from docx import Document
-            doc = Document(template_path)
-
-            # ✅ 准备替换数据（和证人一样的格式）
-            placeholders = {
-                '受伤职工': injured_name,
-                '法人姓名': legal_name,
-                '法人性别': data.get('法人性别', ''),
-                '法人年龄': data.get('法人年龄', ''),
-                '法人身份证': data.get('法人身份证号', ''),
-                '法人身份证地址': data.get('法人身份证地址', ''),
-                '法人电话': data.get('法人电话', ''),
-                '法人岗位': data.get('法人岗位', ''),
-                '用人单位': data.get('用人单位', ''),
-                '用工单位': data.get('用工单位', ''),
-                '工作场所': data.get('工作场所', ''),
-                '操作员': data.get('操作员', ''),
-                '当前日期': datetime.now().strftime('%Y年%m月%d日'),
-                '当前时间': datetime.now().strftime('%H时%M分'),
-            }
-
-            # ✅ 统一替换逻辑（带花括号查找）
-            for paragraph in doc.paragraphs:
-                text = paragraph.text
-                for key, value in placeholders.items():
-                    if f"{{{key}}}" in text:
-                        text = text.replace(f"{{{key}}}", str(value))
-                paragraph.text = text
-
-            # 插入问答句
-            doc = self.add_questions_to_doc(doc, data)
-
-            doc.save(filepath)
-            os.startfile(filepath)
-
-            # 更新索引
-            self.update_case_index(data['案本号'], data['受伤职工'], data)
-
-            self.statusBar().showMessage(f"法人笔录已生成: {filename}", 3000)
-            return True
-
-        except Exception as e:
-            self.statusBar().showMessage(f"生成失败: {str(e)}", 3000)
-            return False
 
     def search_same_name_cases(self, name, id_card):
         """搜索同名案件"""
@@ -1035,7 +1055,7 @@ class MainWindow(QMainWindow):
         else:
             description = f"我是{name}。从事{position}工作。"
 
-        return f"答：{description}"
+        return description
 
     def show_case_selection_dialog(self, name, cases, id_card):
         """显示案件选择对话框（支持红色显示身份证不同的案件）"""
@@ -1206,52 +1226,15 @@ class MainWindow(QMainWindow):
         return data
 
     def generate_transcript(self, case_folder, template_name, data):
-        """生成Word文档"""
-        template_path = os.path.join(self.BASE_DIR, "templates", template_name)
-
-        if not os.path.exists(template_path):
-            self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
-            return False
-
-        from docx import Document
-        doc = Document(template_path)
-
-        # ===== 在这里插入自我介绍 =====
-        doc = self.insert_description_into_doc(doc, data)
-        # ============================
-
-        # 替换占位符
-        for paragraph in doc.paragraphs:
-            text = paragraph.text
-            for key, value in data.items():
-                if f"{{{key}}}" in text:
-                    text = text.replace(f"{{{key}}}", str(value))
-            paragraph.text = text
-
-        # ===== 在这里插入问答句 =====
-        doc = self.add_questions_to_doc(doc, data)
-
-        # 保存文件
-        doc_file = os.path.join(case_folder, f"{data['案本号']}_笔录.docx")
-        doc.save(doc_file)
-
-        # 打开Word文档
-        os.startfile(doc_file)
-
-        # 弹出提示框，询问是否已关闭Word
-        reply = QMessageBox.question(
-            self, '确认',
-            '请在关闭Word文档后点击"是"，程序将自动提取关键信息\n\n点击"否"则跳过提取',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
+        """生成本人笔录"""
+        return self.generate_transcript_unified(
+            case_folder=case_folder,
+            data=data,
+            template_name=template_name,
+            file_prefix="本人",
+            person_type="本人",
+            person_name=data.get('本人姓名', '')
         )
-
-        if reply == QMessageBox.Yes:
-            # 等待一小段时间确保Word完全关闭
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(1000, lambda: self.extract_person_info_from_doc(doc_file, data['案本号']))
-
-        return True
 
     def extract_person_info_from_doc(self, doc_file, case_number):
         """从Word文档中提取本人关键信息"""
@@ -1551,19 +1534,24 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def insert_description_into_doc(self, doc, data):
-        """将自我介绍插入到文档中（在指定问题后面插入）"""
+        """
+        将自我介绍插入到文档中（使用占位符替换）
+        不再依赖特定问题文本，而是直接替换 {自我介绍} 占位符
+        """
         description = self.generate_description(data)
 
-        # 查找目标段落
-        for i, paragraph in enumerate(doc.paragraphs):
-            if "问：请介绍一下你的姓名" in paragraph.text:
-                # 如果后面还有段落，在下一个段落前面插入
-                if i < len(doc.paragraphs) - 1:
-                    doc.paragraphs[i + 1].insert_paragraph_before(description)
-                else:
-                    # 如果是最后一个段落，直接在末尾添加
-                    doc.add_paragraph(description)
-                break
+        # 遍历所有段落，替换 {自我介绍} 占位符
+        for paragraph in doc.paragraphs:
+            if "{自我介绍}" in paragraph.text:
+                paragraph.text = paragraph.text.replace("{自我介绍}", description)
+
+        # 也检查表格中的单元格
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        if "{自我介绍}" in paragraph.text:
+                            paragraph.text = paragraph.text.replace("{自我介绍}", description)
 
         return doc
 
