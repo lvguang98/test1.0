@@ -48,6 +48,10 @@ class MainWindow(QMainWindow):
         self.btn_generate_record.clicked.connect(self.on_generate_record)
         # 身份证号框失去焦点
         self.lineEdit_id_card.editingFinished.connect(self.auto_calculate_id_info)
+        # 用人单位失去焦点时触发
+        self.comboBox_employer.lineEdit().editingFinished.connect(self.auto_fill_applicant)
+        # 本人姓名失去焦点时触发
+        self.lineEdit_name.editingFinished.connect(self.auto_fill_applicant)
 
         # 6. 根据记住状态更新界面
         self.update_ui()
@@ -57,11 +61,73 @@ class MainWindow(QMainWindow):
         self.radio_witness.toggled.connect(self.on_person_type_changed)
         self.radio_legal_entity.toggled.connect(self.on_person_type_changed)
 
-        # 本人姓名失去焦点时自动填入受伤职工
-        self.lineEdit_name.editingFinished.connect(self.auto_fill_injured_worker)
+        # 连接案件类型复选框的信号
+        self.checkBox_personal.stateChanged.connect(self.on_case_type_changed)
+        self.checkBox_death.stateChanged.connect(self.on_case_type_changed)
+
+        # 用人单位改变时更新申请人
+        self.comboBox_employer.currentTextChanged.connect(self.on_case_type_changed)
+        # 本人姓名改变时更新申请人
+        self.lineEdit_name.textChanged.connect(self.on_case_type_changed)
 
         self.current_case_number = None  # 当前使用的案本号
         self.current_folder_path = None  # 当前使用的文件夹路径
+
+        self.label_current_case.setText("当前案本：无")
+
+    def on_case_type_changed(self):
+        """案件类型改变时，重新计算并更新申请人"""
+        # 只处理本人类型
+        if not self.radio_self.isChecked():
+            return
+
+        case_type = self.check_case_type()
+
+        # 根据案件类型重新计算申请人
+        if case_type in ["普通案件", "死亡案件"]:
+            # 普通案件或死亡案件：申请人 = 用人单位
+            employer = self.comboBox_employer.currentText().strip()
+            if employer and employer != "用人单位名称汇总":
+                self.lineEdit_applicant.setText(employer)
+            else:
+                self.lineEdit_applicant.clear()  # 如果没有用人单位，清空申请人
+
+        elif case_type == "个人案件":
+            # 个人案件：申请人 = 本人姓名
+            name = self.lineEdit_name.text().strip()
+            if name:
+                self.lineEdit_applicant.setText(name)
+            else:
+                self.lineEdit_applicant.clear()
+
+        elif case_type == "个人申请死亡案件":
+            # 个人死亡案件：不清空，但可以给个提示
+            if not self.lineEdit_applicant.text().strip():
+                self.lineEdit_applicant.setPlaceholderText("请输入家属姓名")
+
+    def auto_fill_applicant(self):
+        """根据案件类型自动填充申请人"""
+        # 只处理本人类型
+        if not self.radio_self.isChecked():
+            return
+
+        case_type = self.check_case_type()
+
+        # 普通案件或普通死亡案件：申请人 = 用人单位
+        if case_type in ["普通案件", "死亡案件"]:
+            employer = self.comboBox_employer.currentText().strip()
+            if employer and employer != "用人单位名称汇总":
+                self.lineEdit_applicant.setText(employer)
+
+        # 个人案件：申请人 = 本人姓名
+        elif case_type == "个人案件":
+            name = self.lineEdit_name.text().strip()
+            if name:
+                self.lineEdit_applicant.setText(name)
+
+        # 个人死亡案件：不清空，让用户手动输入
+        # elif case_type == "个人申请死亡案件":
+        #     pass  # 不做自动填充
 
     def setup_document_buttons(self):
         """连接各类文书生成按钮"""
@@ -110,13 +176,45 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", "模板不存在")
                 return
 
+            # 创建文档对象
             doc = Document(template_path)
+
+            # 获取受伤职工姓名
+            injured_name = case_data.get('person_name', '')
             person_info = case_data.get('person_info', {})
 
-            # 替换数据
+            # 定义文本处理函数
+            def process_self_intro(text):
+                if not text:
+                    return text
+                return text[2:] if text.startswith("我是") else text
+
+            def process_text(text):
+                if not text:
+                    return text
+                text = text.replace("我们", "他们")
+                text = text.replace("我", injured_name)
+                return text
+
+            def process_conclusion(text):
+                if not text:
+                    return text
+                colon_index = text.find("：")
+                if colon_index != -1:
+                    return text[colon_index + 1:].strip()
+                return text
+
+            # 处理文本
+            processed_self_intro = process_self_intro(person_info.get('自我介绍', ''))
+            processed_injury = process_text(person_info.get('受伤经过', ''))
+            processed_medical = process_text(person_info.get('就医情况', ''))
+            processed_conclusion = process_conclusion(person_info.get('医疗结论', ''))
+
+            # 准备替换数据
             replace_data = {
                 '{案本号}': case_data.get('case_number', ''),
-                '{受伤职工}': case_data.get('person_name', ''),
+                '{受伤职工}': injured_name,
+                '{申请人}': case_data.get('applicant', ''),
                 '{性别}': person_info.get('gender', ''),
                 '{年龄}': person_info.get('age', ''),
                 '{身份证号}': person_info.get('id_card', ''),
@@ -124,10 +222,10 @@ class MainWindow(QMainWindow):
                 '{现住址}': person_info.get('current_address', ''),
                 '{联系电话}': person_info.get('phone', ''),
                 '{岗位}': person_info.get('position', ''),
-                '{自我介绍}': person_info.get('自我介绍', ''),
-                '{受伤经过}': person_info.get('受伤经过', ''),
-                '{就医情况}': person_info.get('就医情况', ''),
-                '{医疗结论}': person_info.get('医疗结论', ''),
+                '{自我介绍}': processed_self_intro,
+                '{受伤经过}': processed_injury,
+                '{就医情况}': processed_medical,
+                '{医疗结论}': processed_conclusion,
                 '{用人单位}': case_data.get('employer', ''),
                 '{用工单位}': case_data.get('work_unit', ''),
                 '{工作场所}': case_data.get('workplace', ''),
@@ -137,12 +235,13 @@ class MainWindow(QMainWindow):
                 '{当前日期}': datetime.now().strftime('%Y年%m月%d日'),
             }
 
-            # 替换所有占位符
+            # 替换段落中的占位符
             for paragraph in doc.paragraphs:
                 for key, value in replace_data.items():
                     if key in paragraph.text:
                         paragraph.text = paragraph.text.replace(key, value)
 
+            # 替换表格中的占位符
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -151,7 +250,7 @@ class MainWindow(QMainWindow):
                                 if key in paragraph.text:
                                     paragraph.text = paragraph.text.replace(key, value)
 
-            # 保存并打开
+            # 保存文件
             case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
             filename = f"{self.current_case_number}_案件审批表.docx"
             filepath = os.path.join(case_folder, filename)
@@ -163,6 +262,8 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"生成失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def generate_injury_notice(self):
         """生成工伤告知书"""
@@ -193,13 +294,6 @@ class MainWindow(QMainWindow):
         # TODO: 实现案审会材料生成逻辑
         print("生成案审会材料")
         self.statusBar().showMessage("生成案审会材料功能开发中", 2000)
-
-    def auto_fill_injured_worker(self):
-        """本人姓名输入完成时自动填入受伤职工"""
-        if self.check_person_type() == "本人":
-            name = self.lineEdit_name.text().strip()
-            if name:
-                self.lineEdit_injured_worker.setText(name)
 
     def on_person_type_changed(self):
         """人员类型切换时的处理"""
@@ -542,8 +636,16 @@ class MainWindow(QMainWindow):
 
     def on_generate_record(self):
         """生成笔录按钮点击"""
+        # 检查个人死亡案件的申请人
+        if self.check_case_type() == "个人申请死亡案件" and self.radio_self.isChecked():
+            if not self.lineEdit_applicant.text().strip():
+                QMessageBox.warning(self, "提示", "请填写申请人信息（家属姓名）")
+                return
+
         # 1. 收集数据
         data = self.collect_form_data()
+        if not data:  # 如果收集数据失败（比如申请人未填写）
+            return
 
         # 2. 根据人员类型分流
         if data['人员类型'] == "本人":
@@ -594,6 +696,9 @@ class MainWindow(QMainWindow):
                     self.current_case_number = selected_case['case_number']
                     self.current_folder_path = selected_case['folder_path']
 
+                    # 更新案本号显示（只改文本）
+                    self.label_current_case.setText(f"当前案本：{self.current_case_number}")
+
                     person_info = selected_case.get('person_info', {})
                     self.lineEdit_name.setText(person_info.get('name', ''))
                     self.lineEdit_id_card.setText(selected_case.get('id_card', ''))
@@ -621,6 +726,9 @@ class MainWindow(QMainWindow):
         # 保存当前使用的案本信息
         self.current_case_number = case_number
         self.current_folder_path = f"{datetime.now().year}/{case_number}"
+
+        # 更新案本号显示（只改文本）
+        self.label_current_case.setText(f"当前案本：{self.current_case_number}")
 
         # 在数据中添加自我介绍
         data['自我介绍'] = description
@@ -1219,9 +1327,20 @@ class MainWindow(QMainWindow):
         if workplace == "工作场所名称汇总":
             workplace = ""
 
+        applicant = self.lineEdit_applicant.text().strip()
+
+        # 获取受伤职工（从本人姓名获取）
+        injured_worker = self.lineEdit_name.text().strip()  # ✅ 改为从本人姓名获取
+
+        # 个人死亡案件检查
+        if self.check_case_type() == "个人申请死亡案件" and self.radio_self.isChecked():
+            if not applicant:
+                return None  # 返回None表示数据不完整
+
         data = {
             '案本号': '',
-            '受伤职工': self.lineEdit_injured_worker.text().strip(),
+            '受伤职工': injured_worker,  # 从本人姓名获取
+            '申请人': applicant,
             '用人单位': employer,
             '用工单位': work_unit,
             '工作场所': workplace,
@@ -1426,6 +1545,7 @@ class MainWindow(QMainWindow):
                     index_data['cases'][i] = {
                         'case_number': case_number,
                         'person_name': person_name,
+                        'applicant': data.get('申请人', ''),  # 新增
                         'case_type': data.get('案件类型', existing_case.get('case_type', '')),
                         'year': datetime.now().year,
                         'folder_path': existing_case.get('folder_path', f"{datetime.now().year}/{case_number}"),
@@ -1447,6 +1567,7 @@ class MainWindow(QMainWindow):
                 case_data = {
                     'case_number': case_number,
                     'person_name': person_name,
+                    'applicant': data.get('申请人', ''),  # 新增
                     'case_type': data.get('案件类型', ''),
                     'year': datetime.now().year,
                     'folder_path': f"{datetime.now().year}/{case_number}",
@@ -1691,10 +1812,6 @@ class MainWindow(QMainWindow):
 
         # 触发自动计算
         self.auto_calculate_id_info()
-
-        # 如果是本人，触发自动填入受伤职工
-        if self.check_person_type() == "本人":
-            self.auto_fill_injured_worker()
 
         # 更新索引（循环）
         self.test_index = (self.test_index + 1) % len(test_data)

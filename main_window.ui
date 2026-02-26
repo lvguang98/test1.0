@@ -133,14 +133,14 @@
     <widget class="QLabel" name="label_5">
      <property name="geometry">
       <rect>
-       <x>30</x>
-       <y>70</y>
+       <x>40</x>
+       <y>80</y>
        <width>54</width>
        <height>16</height>
       </rect>
      </property>
      <property name="text">
-      <string>受伤职工:</string>
+      <string>申请人：</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_6">
@@ -245,16 +245,6 @@
      </property>
      <property name="text">
       <string>岗位:</string>
-     </property>
-    </widget>
-    <widget class="QLineEdit" name="lineEdit_injured_worker">
-     <property name="geometry">
-      <rect>
-       <x>120</x>
-       <y>70</y>
-       <width>133</width>
-       <height>20</height>
-      </rect>
      </property>
     </widget>
     <widget class="QLineEdit" name="lineEdit_name">
@@ -540,8 +530,8 @@
     <widget class="QPushButton" name="btn_generate_record">
      <property name="geometry">
       <rect>
-       <x>350</x>
-       <y>70</y>
+       <x>360</x>
+       <y>80</y>
        <width>151</width>
        <height>23</height>
       </rect>
@@ -587,6 +577,34 @@
      </property>
      <property name="text">
       <string>删除</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="lineEdit_applicant">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>80</y>
+       <width>221</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_current_case">
+     <property name="geometry">
+      <rect>
+       <x>330</x>
+       <y>30</y>
+       <width>171</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">border: 1px solid #999;
+
+</string>
+     </property>
+     <property name="text">
+      <string>当前案本：无</string>
      </property>
     </widget>
    </widget>
