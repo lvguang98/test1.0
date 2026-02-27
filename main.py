@@ -140,9 +140,6 @@ class MainWindow(QMainWindow):
         # 谈话通知书
         self.btn_interview_notice.clicked.connect(self.generate_interview_notice)
 
-        # 案审会材料
-        self.btn_review_materials.clicked.connect(self.generate_review_materials)
-
     def generate_case_approval(self):
         """生成案件审批表"""
         if not self.current_case_number:
@@ -258,6 +255,9 @@ class MainWindow(QMainWindow):
             doc.save(filepath)
             os.startfile(filepath)
 
+            # ===== 新增：从审批表中提取申请时间和受理时间 =====
+            self.extract_approval_times(doc, case_data, index_data, index_file)
+
             self.statusBar().showMessage(f"已生成案件审批表: {filename}", 3000)
 
         except Exception as e:
@@ -265,35 +265,323 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
 
+    def extract_approval_times(self, doc, case_data, index_data, index_file):
+        """从审批表文档中提取申请时间和受理时间并保存到JSON"""
+        try:
+            import re
+            from datetime import datetime
+
+            application_time = ""
+            acceptance_time = ""
+
+            # 遍历表格查找申请时间和受理时间
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = ""
+                    for cell in row.cells:
+                        row_text += cell.text.strip()
+
+                    # 查找包含"申请时间"的行
+                    if "申请时间" in row_text:
+                        # 获取申请时间的值（通常在下一个单元格）
+                        cells = row.cells
+                        for i, cell in enumerate(cells):
+                            if "申请时间" in cell.text:
+                                if i + 1 < len(cells):
+                                    time_value = cells[i + 1].text.strip()
+                                    if time_value:
+                                        application_time = self.format_date(time_value)
+                                break
+
+                    # 查找包含"受理时间"的行
+                    if "受理时间" in row_text:
+                        # 获取受理时间的值（通常在下一个单元格）
+                        cells = row.cells
+                        for i, cell in enumerate(cells):
+                            if "受理时间" in cell.text:
+                                if i + 1 < len(cells):
+                                    time_value = cells[i + 1].text.strip()
+                                    if time_value:
+                                        acceptance_time = self.format_date(time_value)
+                                break
+
+            # 如果找到了时间，更新索引文件
+            if application_time or acceptance_time:
+                # 查找当前案件并更新时间
+                for case in index_data.get('cases', []):
+                    if case['case_number'] == case_data['case_number']:
+                        if 'approval_info' not in case:
+                            case['approval_info'] = {}
+
+                        if application_time:
+                            case['approval_info']['申请时间'] = application_time
+                        if acceptance_time:
+                            case['approval_info']['受理时间'] = acceptance_time
+
+                        print(f"已保存申请时间: {application_time}, 受理时间: {acceptance_time}")
+                        break
+
+                # 保存更新后的索引文件
+                import json
+                import shutil
+                temp_file = index_file + ".tmp"
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(index_data, f, ensure_ascii=False, indent=2)
+                shutil.move(temp_file, index_file)
+
+        except Exception as e:
+            print(f"提取申请/受理时间失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def format_date(self, date_str):
+        """将日期字符串格式化为 xxxx年xx月xx日"""
+        if not date_str:
+            return ""
+
+        # 移除所有非数字字符
+        import re
+        digits = re.sub(r'\D', '', date_str)
+
+        # 如果是8位数字（如20260101）
+        if len(digits) == 8:
+            year = digits[0:4]
+            month = digits[4:6].lstrip('0')  # 去掉前导零
+            day = digits[6:8].lstrip('0')  # 去掉前导零
+            return f"{year}年{month}月{day}日"
+
+        # 如果是其他格式，尝试解析
+        try:
+            from datetime import datetime
+            # 尝试常见格式
+            for fmt in ["%Y%m%d", "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"]:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    return dt.strftime("%Y年%m月%d日")
+                except:
+                    continue
+        except:
+            pass
+
+        # 如果都无法解析，返回原字符串
+        return date_str
+
     def generate_injury_notice(self):
-        """生成工伤告知书"""
+        """生成工伤认定告知书"""
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
-        # TODO: 实现工伤告知书生成逻辑
-        print("生成工伤告知书")
-        self.statusBar().showMessage("生成工伤告知书功能开发中", 2000)
+        try:
+            import json
+            from docx import Document
+            from datetime import datetime
+            import os
+
+            # 读取索引文件
+            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+            with open(index_file, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
+
+            # 查找当前案本
+            case_data = None
+            for case in index_data.get('cases', []):
+                if case['case_number'] == self.current_case_number:
+                    case_data = case
+                    break
+
+            if not case_data:
+                QMessageBox.warning(self, "错误", f"未找到案本 {self.current_case_number} 的数据")
+                return
+
+            # 查找审批表文件
+            case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
+            approval_file = None
+            for file in os.listdir(case_folder):
+                if file.endswith('_案件审批表.docx'):
+                    approval_file = os.path.join(case_folder, file)
+                    break
+
+            if not approval_file:
+                QMessageBox.warning(self, "提示", "请先生成案件审批表")
+                return
+
+            # 从审批表读取数据
+            approval_doc = Document(approval_file)
+
+            申请时间 = ""
+            受理时间 = ""
+            综合情况 = ""
+            医疗结论 = ""
+
+            # 遍历表格查找数据
+            for table in approval_doc.tables:
+                for row in table.rows:
+                    for i, cell in enumerate(row.cells):
+                        text = cell.text
+                        if "申请时间" in text and i + 1 < len(row.cells):
+                            申请时间 = row.cells[i + 1].text.strip()
+                        elif "受理时间" in text and i + 1 < len(row.cells):
+                            受理时间 = row.cells[i + 1].text.strip()
+                        elif "受伤经过" in text and i + 1 < len(row.cells):
+                            综合情况 = row.cells[i + 1].text.strip()
+                        elif "医疗诊断" in text and i + 1 < len(row.cells):
+                            医疗结论 = row.cells[i + 1].text.strip()
+
+            # 格式化时间（20260101 -> 2026年1月1日）
+            if len(申请时间) == 8 and 申请时间.isdigit():
+                申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
+            if len(受理时间) == 8 and 受理时间.isdigit():
+                受理时间 = f"{受理时间[:4]}年{int(受理时间[4:6])}月{int(受理时间[6:])}日"
+
+            if not 申请时间 or not 受理时间:
+                QMessageBox.warning(self, "提示", "审批表中未找到申请时间或受理时间")
+                return
+
+            # 获取模板
+            template_path = os.path.join(self.TEMPLATE_DIR, "工伤认定告知书（模板）.docx")
+            if not os.path.exists(template_path):
+                QMessageBox.warning(self, "错误", "工伤认定告知书模板不存在")
+                return
+
+            doc = Document(template_path)
+
+            # 准备替换数据
+            replace_data = {
+                '{用人单位}': case_data.get('employer', ''),
+                '{申请人}': case_data.get('applicant', ''),
+                '{申请时间}': 申请时间,
+                '{受理时间}': 受理时间,
+                '{受伤职工}': case_data.get('person_name', ''),
+                '{综合情况}': 综合情况,
+                '{医疗结论}': 医疗结论,
+                '{条例}': case_data.get('regulation', ''),
+                '{当前时期}': datetime.now().strftime('%Y年%m月%d日'),
+            }
+
+            # 替换占位符
+            for para in doc.paragraphs:
+                for key, value in replace_data.items():
+                    if key in para.text:
+                        para.text = para.text.replace(key, value)
+
+            # 保存文件
+            filename = f"{self.current_case_number}_工伤认定告知书.docx"
+            filepath = os.path.join(case_folder, filename)
+            doc.save(filepath)
+            os.startfile(filepath)
+
+            self.statusBar().showMessage(f"已生成工伤认定告知书: {filename}", 3000)
+
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"生成工伤认定告知书失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def generate_interview_notice(self):
-        """生成谈话通知书"""
+        """生成接受谈话通知书"""
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
-        # TODO: 实现谈话通知书生成逻辑
-        print("生成谈话通知书")
-        self.statusBar().showMessage("生成谈话通知书功能开发中", 2000)
+        try:
+            import json
+            from docx import Document
+            from datetime import datetime
+            import os
 
-    def generate_review_materials(self):
-        """生成案审会材料"""
-        if not self.current_case_number:
-            QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
-            return
+            # 读取索引文件
+            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+            with open(index_file, 'r', encoding='utf-8') as f:
+                index_data = json.load(f)
 
-        # TODO: 实现案审会材料生成逻辑
-        print("生成案审会材料")
-        self.statusBar().showMessage("生成案审会材料功能开发中", 2000)
+            # 查找当前案本
+            case_data = None
+            for case in index_data.get('cases', []):
+                if case['case_number'] == self.current_case_number:
+                    case_data = case
+                    break
+
+            if not case_data:
+                QMessageBox.warning(self, "错误", f"未找到案本 {self.current_case_number} 的数据")
+                return
+
+            # 查找审批表文件
+            case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
+            approval_file = None
+            for file in os.listdir(case_folder):
+                if file.endswith('_案件审批表.docx'):
+                    approval_file = os.path.join(case_folder, file)
+                    break
+
+            if not approval_file:
+                QMessageBox.warning(self, "提示", "请先生成案件审批表")
+                return
+
+            # 从审批表读取数据
+            approval_doc = Document(approval_file)
+
+            申请时间 = ""
+            受理时间 = ""
+            综合情况 = ""
+            医疗结论 = ""
+
+            # 遍历表格查找数据
+            for table in approval_doc.tables:
+                for row in table.rows:
+                    for i, cell in enumerate(row.cells):
+                        text = cell.text
+                        if "申请时间" in text and i + 1 < len(row.cells):
+                            申请时间 = row.cells[i + 1].text.strip()
+                        elif "受理时间" in text and i + 1 < len(row.cells):
+                            受理时间 = row.cells[i + 1].text.strip()
+                        elif "受伤经过" in text and i + 1 < len(row.cells):
+                            综合情况 = row.cells[i + 1].text.strip()
+                        elif "医疗诊断" in text and i + 1 < len(row.cells):
+                            医疗结论 = row.cells[i + 1].text.strip()
+
+            # 格式化时间（20260101 -> 2026年1月1日）
+            if len(申请时间) == 8 and 申请时间.isdigit():
+                申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
+            if len(受理时间) == 8 and 受理时间.isdigit():
+                受理时间 = f"{受理时间[:4]}年{int(受理时间[4:6])}月{int(受理时间[6:])}日"
+
+            if not 申请时间 or not 受理时间:
+                QMessageBox.warning(self, "提示", "审批表中未找到申请时间或受理时间")
+                return
+
+            # 生成通知书
+            template_path = os.path.join(self.TEMPLATE_DIR, "接受谈话通知书（模板）.docx")
+            doc = Document(template_path)
+
+            replace_data = {
+                '{用人单位}': case_data.get('employer', ''),
+                '{申请人}': case_data.get('applicant', ''),
+                '{申请时间}': 申请时间,
+                '{受理时间}': 受理时间,
+                '{本人姓名}': case_data.get('person_name', ''),
+                '{本人身份证}': case_data.get('person_info', {}).get('id_card', ''),
+                '{综合情况}': 综合情况,
+                '{医疗结论}': 医疗结论,
+                '{当前时期}': datetime.now().strftime('%Y年%m月%d日'),
+            }
+
+            # 替换占位符
+            for para in doc.paragraphs:
+                for key, value in replace_data.items():
+                    if key in para.text:
+                        para.text = para.text.replace(key, value)
+
+            # 保存文件
+            filename = f"{self.current_case_number}_接受谈话通知书.docx"
+            filepath = os.path.join(case_folder, filename)
+            doc.save(filepath)
+            os.startfile(filepath)
+
+            self.statusBar().showMessage(f"已生成接受谈话通知书: {filename}", 3000)
+
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"生成失败: {str(e)}")
 
     def on_person_type_changed(self):
         """人员类型切换时的处理"""
