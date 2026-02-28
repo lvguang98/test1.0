@@ -141,14 +141,14 @@ class MainWindow(QMainWindow):
         self.btn_interview_notice.clicked.connect(self.generate_interview_notice)
 
     def generate_case_approval(self):
-        """生成案件审批表"""
+        """生成案件审批表（使用docxtpl）"""
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
         try:
             import json
-            from docx import Document
+            from docxtpl import DocxTemplate
             from datetime import datetime
 
             # 读取索引文件
@@ -173,8 +173,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", "模板不存在")
                 return
 
-            # 创建文档对象
-            doc = Document(template_path)
+            # 使用DocxTemplate加载模板
+            doc = DocxTemplate(template_path)
 
             # 获取受伤职工姓名
             injured_name = case_data.get('person_name', '')
@@ -207,45 +207,33 @@ class MainWindow(QMainWindow):
             processed_medical = process_text(person_info.get('就医情况', ''))
             processed_conclusion = process_conclusion(person_info.get('医疗结论', ''))
 
-            # 准备替换数据
-            replace_data = {
-                '{案本号}': case_data.get('case_number', ''),
-                '{受伤职工}': injured_name,
-                '{申请人}': case_data.get('applicant', ''),
-                '{性别}': person_info.get('gender', ''),
-                '{年龄}': person_info.get('age', ''),
-                '{身份证号}': person_info.get('id_card', ''),
-                '{身份证地址}': person_info.get('address', ''),
-                '{现住址}': person_info.get('current_address', ''),
-                '{联系电话}': person_info.get('phone', ''),
-                '{岗位}': person_info.get('position', ''),
-                '{自我介绍}': processed_self_intro,
-                '{受伤经过}': processed_injury,
-                '{就医情况}': processed_medical,
-                '{医疗结论}': processed_conclusion,
-                '{用人单位}': case_data.get('employer', ''),
-                '{用工单位}': case_data.get('work_unit', ''),
-                '{工作场所}': case_data.get('workplace', ''),
-                '{条例}': case_data.get('regulation', ''),
-                '{案件类型}': case_data.get('case_type', ''),
-                '{操作员}': case_data.get('operator', ''),
-                '{当前日期}': datetime.now().strftime('%Y年%m月%d日'),
+            # 准备替换数据（注意使用双大括号）
+            render_data = {
+                '案本号': case_data.get('case_number', ''),
+                '受伤职工': injured_name,
+                '申请人': case_data.get('applicant', ''),
+                '性别': person_info.get('gender', ''),
+                '年龄': person_info.get('age', ''),
+                '身份证号': person_info.get('id_card', ''),
+                '身份证地址': person_info.get('address', ''),
+                '现住址': person_info.get('current_address', ''),
+                '联系电话': person_info.get('phone', ''),
+                '岗位': person_info.get('position', ''),
+                '自我介绍': processed_self_intro,
+                '受伤经过': processed_injury,
+                '就医情况': processed_medical,
+                '医疗结论': processed_conclusion,
+                '用人单位': case_data.get('employer', ''),
+                '用工单位': case_data.get('work_unit', ''),
+                '工作场所': case_data.get('workplace', ''),
+                '条例': case_data.get('regulation', ''),
+                '案件类型': case_data.get('case_type', ''),
+                '操作员': case_data.get('operator', ''),
+                '当前日期': datetime.now().strftime('%Y年%m月%d日'),
             }
 
-            # 替换段落中的占位符
-            for paragraph in doc.paragraphs:
-                for key, value in replace_data.items():
-                    if key in paragraph.text:
-                        paragraph.text = paragraph.text.replace(key, value)
-
-            # 替换表格中的占位符
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            for key, value in replace_data.items():
-                                if key in paragraph.text:
-                                    paragraph.text = paragraph.text.replace(key, value)
+            # 渲染模板
+            doc.render(render_data)
 
             # 保存文件
             case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
@@ -255,8 +243,11 @@ class MainWindow(QMainWindow):
             doc.save(filepath)
             os.startfile(filepath)
 
-            # ===== 新增：从审批表中提取申请时间和受理时间 =====
-            self.extract_approval_times(doc, case_data, index_data, index_file)
+            # 提取申请时间和受理时间
+            # 注意：这里需要用python-docx重新打开文件来读取表格内容
+            from docx import Document
+            approval_doc = Document(filepath)
+            self.extract_approval_times(approval_doc, case_data, index_data, index_file)
 
             self.statusBar().showMessage(f"已生成案件审批表: {filename}", 3000)
 
@@ -367,14 +358,14 @@ class MainWindow(QMainWindow):
         return date_str
 
     def generate_injury_notice(self):
-        """生成工伤认定告知书"""
+        """生成工伤认定告知书（使用docxtpl）"""
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
         try:
             import json
-            from docx import Document
+            from docxtpl import DocxTemplate
             from datetime import datetime
             import os
 
@@ -407,6 +398,7 @@ class MainWindow(QMainWindow):
                 return
 
             # 从审批表读取数据
+            from docx import Document
             approval_doc = Document(approval_file)
 
             申请时间 = ""
@@ -428,7 +420,7 @@ class MainWindow(QMainWindow):
                         elif "医疗诊断" in text and i + 1 < len(row.cells):
                             医疗结论 = row.cells[i + 1].text.strip()
 
-            # 格式化时间（20260101 -> 2026年1月1日）
+            # 格式化时间
             if len(申请时间) == 8 and 申请时间.isdigit():
                 申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
             if len(受理时间) == 8 and 受理时间.isdigit():
@@ -444,26 +436,24 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", "工伤认定告知书模板不存在")
                 return
 
-            doc = Document(template_path)
+            # 使用DocxTemplate加载模板
+            doc = DocxTemplate(template_path)
 
             # 准备替换数据
-            replace_data = {
-                '{用人单位}': case_data.get('employer', ''),
-                '{申请人}': case_data.get('applicant', ''),
-                '{申请时间}': 申请时间,
-                '{受理时间}': 受理时间,
-                '{受伤职工}': case_data.get('person_name', ''),
-                '{综合情况}': 综合情况,
-                '{医疗结论}': 医疗结论,
-                '{条例}': case_data.get('regulation', ''),
-                '{当前时期}': datetime.now().strftime('%Y年%m月%d日'),
+            render_data = {
+                '用人单位': case_data.get('employer', ''),
+                '申请人': case_data.get('applicant', ''),
+                '申请时间': 申请时间,
+                '受理时间': 受理时间,
+                '受伤职工': case_data.get('person_name', ''),
+                '综合情况': 综合情况,
+                '医疗结论': 医疗结论,
+                '条例': case_data.get('regulation', ''),
+                '当前时期': datetime.now().strftime('%Y年%m月%d日'),
             }
 
-            # 替换占位符
-            for para in doc.paragraphs:
-                for key, value in replace_data.items():
-                    if key in para.text:
-                        para.text = para.text.replace(key, value)
+            # 渲染模板
+            doc.render(render_data)
 
             # 保存文件
             filename = f"{self.current_case_number}_工伤认定告知书.docx"
@@ -479,14 +469,14 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
     def generate_interview_notice(self):
-        """生成接受谈话通知书"""
+        """生成接受谈话通知书（使用docxtpl）"""
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
 
         try:
             import json
-            from docx import Document
+            from docxtpl import DocxTemplate
             from datetime import datetime
             import os
 
@@ -519,6 +509,7 @@ class MainWindow(QMainWindow):
                 return
 
             # 从审批表读取数据
+            from docx import Document
             approval_doc = Document(approval_file)
 
             申请时间 = ""
@@ -540,7 +531,7 @@ class MainWindow(QMainWindow):
                         elif "医疗诊断" in text and i + 1 < len(row.cells):
                             医疗结论 = row.cells[i + 1].text.strip()
 
-            # 格式化时间（20260101 -> 2026年1月1日）
+            # 格式化时间
             if len(申请时间) == 8 and 申请时间.isdigit():
                 申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
             if len(受理时间) == 8 and 受理时间.isdigit():
@@ -550,27 +541,30 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "提示", "审批表中未找到申请时间或受理时间")
                 return
 
-            # 生成通知书
+            # 获取模板
             template_path = os.path.join(self.TEMPLATE_DIR, "接受谈话通知书（模板）.docx")
-            doc = Document(template_path)
+            if not os.path.exists(template_path):
+                QMessageBox.warning(self, "错误", "接受谈话通知书模板不存在")
+                return
 
-            replace_data = {
-                '{用人单位}': case_data.get('employer', ''),
-                '{申请人}': case_data.get('applicant', ''),
-                '{申请时间}': 申请时间,
-                '{受理时间}': 受理时间,
-                '{本人姓名}': case_data.get('person_name', ''),
-                '{本人身份证}': case_data.get('person_info', {}).get('id_card', ''),
-                '{综合情况}': 综合情况,
-                '{医疗结论}': 医疗结论,
-                '{当前时期}': datetime.now().strftime('%Y年%m月%d日'),
+            # 使用DocxTemplate加载模板
+            doc = DocxTemplate(template_path)
+
+            # 准备替换数据
+            render_data = {
+                '用人单位': case_data.get('employer', ''),
+                '申请人': case_data.get('applicant', ''),
+                '申请时间': 申请时间,
+                '受理时间': 受理时间,
+                '本人姓名': case_data.get('person_name', ''),
+                '本人身份证': case_data.get('person_info', {}).get('id_card', ''),
+                '综合情况': 综合情况,
+                '医疗结论': 医疗结论,
+                '当前时期': datetime.now().strftime('%Y年%m月%d日'),
             }
 
-            # 替换占位符
-            for para in doc.paragraphs:
-                for key, value in replace_data.items():
-                    if key in para.text:
-                        para.text = para.text.replace(key, value)
+            # 渲染模板
+            doc.render(render_data)
 
             # 保存文件
             filename = f"{self.current_case_number}_接受谈话通知书.docx"
@@ -1253,22 +1247,29 @@ class MainWindow(QMainWindow):
 
     def generate_transcript_unified(self, case_folder, data, template_name, file_prefix, person_type, person_name):
         """
-        统一的笔录生成方法（使用占位符替换）
+        统一的笔录生成方法（使用python-docx-template库）
         """
         try:
-            from docx import Document
+            from docxtpl import DocxTemplate
             import threading
             import time
+            from docx import Document
+            import os
+            import re
 
             template_path = os.path.join(self.TEMPLATE_DIR, template_name)
             if not os.path.exists(template_path):
                 self.statusBar().showMessage(f"模板不存在: {template_name}", 3000)
                 return None
 
-            doc = Document(template_path)
+            # 1. 使用DocxTemplate加载模板
+            doc = DocxTemplate(template_path)
 
-            # 1. 准备所有替换数据
-            placeholders = {
+            # 2. 生成自我介绍文本
+            self_intro_text = self.generate_description(data)
+
+            # 3. 准备所有替换数据
+            render_data = {
                 # 基本信息
                 '受伤职工': data.get('受伤职工', ''),
                 '用人单位': data.get('用人单位', ''),
@@ -1278,8 +1279,8 @@ class MainWindow(QMainWindow):
                 '当前日期': datetime.now().strftime('%Y年%m月%d日'),
                 '当前时间': datetime.now().strftime('%H时%M分'),
 
-                # 自我介绍
-                '自我介绍': self.generate_description(data),
+                # 自我介绍 - 直接放入生成的文本
+                '自我介绍': self_intro_text,
 
                 # 人员特定信息
                 f'{person_type}姓名': person_name,
@@ -1291,33 +1292,23 @@ class MainWindow(QMainWindow):
                 f'{person_type}岗位': data.get(f'{person_type}岗位', ''),
             }
 
-            # 2. 替换所有占位符
-            for paragraph in doc.paragraphs:
-                text = paragraph.text
-                for key, value in placeholders.items():
-                    placeholder = f"{{{key}}}"
-                    if placeholder in text:
-                        text = text.replace(placeholder, str(value))
-                paragraph.text = text
+            # 4. 渲染模板（替换所有普通占位符）
+            doc.render(render_data)
 
-            # 3. 替换表格中的占位符
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            text = paragraph.text
-                            for key, value in placeholders.items():
-                                placeholder = f"{{{key}}}"
-                                if placeholder in text:
-                                    text = text.replace(placeholder, str(value))
-                            paragraph.text = text
+            # 5. 保存临时文件
+            temp_path = os.path.join(case_folder, "temp_render.docx")
+            doc.save(temp_path)
 
-            # 4. 插入案件问答句
-            doc = self.add_questions_to_doc(doc, data)
+            # 6. 用python-docx打开处理问答句（如果需要）
+            final_doc = Document(temp_path)
 
-            # 5. 生成文件名并保存
+            # 7. 添加问答句（仅针对特殊案件）
+            case_type = data.get('案件类型', '')
+            if case_type in ["个人案件", "死亡案件", "个人申请死亡案件"]:
+                self.add_questions_to_doc_with_format(final_doc, case_type, data)
+
+            # 8. 生成最终文件名
             injured_name = data.get('受伤职工', '')
-            import re
             max_num = 0
             if os.path.exists(case_folder):
                 for file in os.listdir(case_folder):
@@ -1331,38 +1322,35 @@ class MainWindow(QMainWindow):
             filename = f"{injured_name}_{file_prefix}{next_num:02d}_{person_name}.docx"
             filepath = os.path.join(case_folder, filename)
 
-            doc.save(filepath)
+            # 9. 保存最终文件
+            final_doc.save(filepath)
 
-            # 打开文件
+            # 10. 删除临时文件
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+            # 11. 打开文件
             os.startfile(filepath)
 
             self.statusBar().showMessage(f"{person_type}笔录已生成: {filename}", 3000)
 
-            # 更新索引
-            self.update_case_index(data['案本号'], data['受伤职工'], data)
+            # 12. 更新索引
+            self.update_case_index(data.get('案本号', ''), data.get('受伤职工', ''), data)
 
-            # ===== 新增：如果是本人笔录，启动后台线程监控文件关闭 =====
+            # 13. 如果是本人笔录，启动后台线程监控文件关闭
             if person_type == "本人":
                 def wait_for_file_close():
-                    """等待文件关闭后自动提取信息"""
-                    time.sleep(2)  # 给Word一点启动时间
-
-                    # 等待文件关闭（尝试以写入模式打开，如果失败说明文件还在使用中）
+                    time.sleep(2)
                     file_closed = False
                     while not file_closed:
                         try:
-                            # 尝试以追加模式打开，如果成功说明文件已关闭
                             with open(filepath, 'a'):
                                 pass
                             file_closed = True
                         except:
-                            # 文件还在使用中，等待1秒后重试
                             time.sleep(1)
+                    self.extract_person_info_from_doc(filepath, data.get('案本号', ''))
 
-                    # 文件已关闭，提取信息
-                    self.extract_person_info_from_doc(filepath, data['案本号'])
-
-                # 启动后台线程
                 threading.Thread(target=wait_for_file_close, daemon=True).start()
 
             return filepath
@@ -1373,38 +1361,52 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             return None
 
+    def add_questions_to_doc_with_format(self, doc, case_type, data):
+        """添加带格式的问答句（仅用于特殊案件）"""
+        questions = self.generate_case_questions(case_type, data)
+        if not questions:
+            return
+
+        # 添加一个空行分隔
+        doc.add_paragraph()
+
+        for q in questions:
+            # 添加问句
+            para = doc.add_paragraph()
+            run = para.add_run(q)
+
+            # 设置问句格式（可以加粗）
+            if q.startswith("问："):
+                run.font.bold = True
+
+            # 添加一个空行分隔每个问答对
+            doc.add_paragraph()
+
     def generate_case_questions(self, case_type, data):
         """根据案件类型生成对应的问答句"""
-
         if case_type == "个人案件":
             return [
                 "问：你是个人申请工伤认定吗？",
                 "答：是的，我是个人申请。",
                 "问：单位为什么没有为你申请？",
                 "答：单位说让我自己申请。",
-                # ... 更多个人案件专用问题
             ]
-
         elif case_type == "死亡案件":
             return [
                 "问：你是死亡职工的家属吗？",
                 "答：是的，我是他的家属。",
                 "问：死亡时间和原因是什么？",
                 "答：...",
-                # ... 更多死亡案件专用问题
             ]
-
         elif case_type == "个人申请死亡案件":
             return [
                 "问：你是以家属身份个人申请工亡吗？",
                 "答：是的。",
                 "问：单位没有为死者申报吗？",
                 "答：没有。",
-                # ... 综合问题
             ]
-
-        else:  # 普通案件
-            return []  # 返回空列表
+        else:
+            return []
 
     def search_same_name_cases(self, name, id_card):
         """搜索同名案件"""
@@ -1441,17 +1443,13 @@ class MainWindow(QMainWindow):
 
     def generate_description(self, data):
         """根据人员类型和单位情况生成描述语句"""
-        person_type = data['人员类型']  # 本人/证人/法人
-        has_employer = bool(data.get('用人单位', ''))
-        has_work_unit = bool(data.get('用工单位', ''))
-        has_workplace = bool(data.get('工作场所', ''))
+        person_type = data['人员类型']
 
-        # 获取姓名（根据人员类型不同，键名不同）
         if person_type == "本人":
             name = data.get('本人姓名', '')
         elif person_type == "证人":
             name = data.get('证人姓名', '')
-        else:  # 法人
+        else:
             name = data.get('法人姓名', '')
 
         employer = data.get('用人单位', '')
@@ -1459,7 +1457,10 @@ class MainWindow(QMainWindow):
         workplace = data.get('工作场所', '')
         position = data.get(f'{person_type}岗位', '')
 
-        # 生成描述语句
+        has_employer = bool(employer)
+        has_work_unit = bool(work_unit)
+        has_workplace = bool(workplace)
+
         if has_employer and has_work_unit and has_workplace:
             description = f"我是{name}，系{employer}的职工，被指派到{work_unit}的{workplace}工作。从事{position}工作。"
         elif has_employer and has_work_unit:
