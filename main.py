@@ -75,6 +75,100 @@ class MainWindow(QMainWindow):
 
         self.label_current_case.setText("当前案本：无")
 
+    def _read_case_index(self):
+        """读取案件索引文件"""
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+        try:
+            import json
+            if os.path.exists(index_file):
+                with open(index_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                return {'cases': [], 'total_cases': 0, 'last_update': ''}
+        except Exception as e:
+            print(f"读取索引失败: {e}")
+            return {'cases': [], 'total_cases': 0, 'last_update': ''}
+
+    def _write_case_index(self, index_data):
+        """写入案件索引文件（原子操作）"""
+        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+        try:
+            import json
+            import shutil
+            import tempfile
+
+            # 使用临时文件
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False) as tf:
+                json.dump(index_data, tf, ensure_ascii=False, indent=2)
+                temp_file = tf.name
+
+            # 替换原文件
+            shutil.move(temp_file, index_file)
+            return True
+
+        except Exception as e:
+            print(f"写入索引失败: {e}")
+            # 注意：这里绝对不能调用任何可能再次调用本方法的方法
+            return False
+
+    def _find_case_in_index(self, case_number):
+        """在索引中查找指定案本"""
+        index_data = self._read_case_index()
+        for case in index_data.get('cases', []):
+            if case['case_number'] == case_number:
+                return case, index_data
+        return None, index_data
+
+    def _get_approval_data(self, case_data):
+        """获取审批表数据（合并重复代码）"""
+        case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
+
+        # 查找审批表文件
+        approval_file = None
+        for file in os.listdir(case_folder):
+            if file.endswith('_案件审批表.docx'):
+                approval_file = os.path.join(case_folder, file)
+                break
+
+        if not approval_file:
+            QMessageBox.warning(self, "提示", "请先生成案件审批表")
+            return None
+
+        # 从审批表读取数据
+        from docx import Document
+        approval_doc = Document(approval_file)
+
+        申请时间 = ""
+        受理时间 = ""
+        综合情况 = ""
+        医疗结论 = ""
+
+        for table in approval_doc.tables:
+            for row in table.rows:
+                for i, cell in enumerate(row.cells):
+                    text = cell.text
+                    if "申请时间" in text and i + 1 < len(row.cells):
+                        申请时间 = row.cells[i + 1].text.strip()
+                    elif "受理时间" in text and i + 1 < len(row.cells):
+                        受理时间 = row.cells[i + 1].text.strip()
+                    elif "受伤经过" in text and i + 1 < len(row.cells):
+                        综合情况 = row.cells[i + 1].text.strip()
+                    elif "医疗诊断" in text and i + 1 < len(row.cells):
+                        医疗结论 = row.cells[i + 1].text.strip()
+
+        # 格式化时间（调用已有方法）
+        申请时间 = self.format_date(申请时间)
+        受理时间 = self.format_date(受理时间)
+
+        return {
+            '申请时间': 申请时间,
+            '受理时间': 受理时间,
+            '综合情况': 综合情况,
+            '医疗结论': 医疗结论,
+            'case_folder': case_folder,
+            'approval_file': approval_file
+        }
+
     def on_case_type_changed(self):
         """案件类型改变时，重新计算并更新申请人"""
         # 只处理本人类型
@@ -142,6 +236,8 @@ class MainWindow(QMainWindow):
 
     def generate_case_approval(self):
         """生成案件审批表（使用docxtpl）"""
+        print(f"当前案本号: {self.current_case_number}")  # 添加这行
+        print(f"当前文件夹: {self.current_folder_path}")  # 添加这行
         if not self.current_case_number:
             QMessageBox.warning(self, "错误", "请先生成本人案本或关联已有案本")
             return
@@ -151,18 +247,8 @@ class MainWindow(QMainWindow):
             from docxtpl import DocxTemplate
             from datetime import datetime
 
-            # 读取索引文件
-            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
-
             # 查找当前案本
-            case_data = None
-            for case in index_data.get('cases', []):
-                if case['case_number'] == self.current_case_number:
-                    case_data = case
-                    break
-
+            case_data, index_data = self._find_case_in_index(self.current_case_number)
             if not case_data:
                 QMessageBox.warning(self, "错误", f"未找到案本 {self.current_case_number} 的数据")
                 return
@@ -244,10 +330,9 @@ class MainWindow(QMainWindow):
             os.startfile(filepath)
 
             # 提取申请时间和受理时间
-            # 注意：这里需要用python-docx重新打开文件来读取表格内容
             from docx import Document
             approval_doc = Document(filepath)
-            self.extract_approval_times(approval_doc, case_data, index_data, index_file)
+            self.extract_approval_times(approval_doc, case_data)  # 去掉 index_data 和 index_file 参数
 
             self.statusBar().showMessage(f"已生成案件审批表: {filename}", 3000)
 
@@ -256,7 +341,7 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
 
-    def extract_approval_times(self, doc, case_data, index_data, index_file):
+    def extract_approval_times(self, doc, case_data):
         """从审批表文档中提取申请时间和受理时间并保存到JSON"""
         try:
             import re
@@ -274,7 +359,6 @@ class MainWindow(QMainWindow):
 
                     # 查找包含"申请时间"的行
                     if "申请时间" in row_text:
-                        # 获取申请时间的值（通常在下一个单元格）
                         cells = row.cells
                         for i, cell in enumerate(cells):
                             if "申请时间" in cell.text:
@@ -286,7 +370,6 @@ class MainWindow(QMainWindow):
 
                     # 查找包含"受理时间"的行
                     if "受理时间" in row_text:
-                        # 获取受理时间的值（通常在下一个单元格）
                         cells = row.cells
                         for i, cell in enumerate(cells):
                             if "受理时间" in cell.text:
@@ -298,6 +381,9 @@ class MainWindow(QMainWindow):
 
             # 如果找到了时间，更新索引文件
             if application_time or acceptance_time:
+                # 读取索引
+                index_data = self._read_case_index()
+
                 # 查找当前案件并更新时间
                 for case in index_data.get('cases', []):
                     if case['case_number'] == case_data['case_number']:
@@ -312,13 +398,8 @@ class MainWindow(QMainWindow):
                         print(f"已保存申请时间: {application_time}, 受理时间: {acceptance_time}")
                         break
 
-                # 保存更新后的索引文件
-                import json
-                import shutil
-                temp_file = index_file + ".tmp"
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(index_data, f, ensure_ascii=False, indent=2)
-                shutil.move(temp_file, index_file)
+                # 保存更新后的索引
+                self._write_case_index(index_data)
 
         except Exception as e:
             print(f"提取申请/受理时间失败: {e}")
@@ -367,66 +448,19 @@ class MainWindow(QMainWindow):
             import json
             from docxtpl import DocxTemplate
             from datetime import datetime
-            import os
-
-            # 读取索引文件
-            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
 
             # 查找当前案本
-            case_data = None
-            for case in index_data.get('cases', []):
-                if case['case_number'] == self.current_case_number:
-                    case_data = case
-                    break
-
+            case_data, index_data = self._find_case_in_index(self.current_case_number)
             if not case_data:
                 QMessageBox.warning(self, "错误", f"未找到案本 {self.current_case_number} 的数据")
                 return
 
-            # 查找审批表文件
-            case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
-            approval_file = None
-            for file in os.listdir(case_folder):
-                if file.endswith('_案件审批表.docx'):
-                    approval_file = os.path.join(case_folder, file)
-                    break
-
-            if not approval_file:
-                QMessageBox.warning(self, "提示", "请先生成案件审批表")
+            # 获取审批表数据
+            approval_data = self._get_approval_data(case_data)
+            if not approval_data:
                 return
 
-            # 从审批表读取数据
-            from docx import Document
-            approval_doc = Document(approval_file)
-
-            申请时间 = ""
-            受理时间 = ""
-            综合情况 = ""
-            医疗结论 = ""
-
-            # 遍历表格查找数据
-            for table in approval_doc.tables:
-                for row in table.rows:
-                    for i, cell in enumerate(row.cells):
-                        text = cell.text
-                        if "申请时间" in text and i + 1 < len(row.cells):
-                            申请时间 = row.cells[i + 1].text.strip()
-                        elif "受理时间" in text and i + 1 < len(row.cells):
-                            受理时间 = row.cells[i + 1].text.strip()
-                        elif "受伤经过" in text and i + 1 < len(row.cells):
-                            综合情况 = row.cells[i + 1].text.strip()
-                        elif "医疗诊断" in text and i + 1 < len(row.cells):
-                            医疗结论 = row.cells[i + 1].text.strip()
-
-            # 格式化时间
-            if len(申请时间) == 8 and 申请时间.isdigit():
-                申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
-            if len(受理时间) == 8 and 受理时间.isdigit():
-                受理时间 = f"{受理时间[:4]}年{int(受理时间[4:6])}月{int(受理时间[6:])}日"
-
-            if not 申请时间 or not 受理时间:
+            if not approval_data['申请时间'] or not approval_data['受理时间']:
                 QMessageBox.warning(self, "提示", "审批表中未找到申请时间或受理时间")
                 return
 
@@ -443,11 +477,11 @@ class MainWindow(QMainWindow):
             render_data = {
                 '用人单位': case_data.get('employer', ''),
                 '申请人': case_data.get('applicant', ''),
-                '申请时间': 申请时间,
-                '受理时间': 受理时间,
+                '申请时间': approval_data['申请时间'],
+                '受理时间': approval_data['受理时间'],
                 '受伤职工': case_data.get('person_name', ''),
-                '综合情况': 综合情况,
-                '医疗结论': 医疗结论,
+                '综合情况': approval_data['综合情况'],
+                '医疗结论': approval_data['医疗结论'],
                 '条例': case_data.get('regulation', ''),
                 '当前时期': datetime.now().strftime('%Y年%m月%d日'),
             }
@@ -457,7 +491,7 @@ class MainWindow(QMainWindow):
 
             # 保存文件
             filename = f"{self.current_case_number}_工伤认定告知书.docx"
-            filepath = os.path.join(case_folder, filename)
+            filepath = os.path.join(approval_data['case_folder'], filename)
             doc.save(filepath)
             os.startfile(filepath)
 
@@ -478,66 +512,19 @@ class MainWindow(QMainWindow):
             import json
             from docxtpl import DocxTemplate
             from datetime import datetime
-            import os
-
-            # 读取索引文件
-            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
 
             # 查找当前案本
-            case_data = None
-            for case in index_data.get('cases', []):
-                if case['case_number'] == self.current_case_number:
-                    case_data = case
-                    break
-
+            case_data, index_data = self._find_case_in_index(self.current_case_number)
             if not case_data:
                 QMessageBox.warning(self, "错误", f"未找到案本 {self.current_case_number} 的数据")
                 return
 
-            # 查找审批表文件
-            case_folder = os.path.join(self.BASE_DIR, case_data.get('folder_path', ''))
-            approval_file = None
-            for file in os.listdir(case_folder):
-                if file.endswith('_案件审批表.docx'):
-                    approval_file = os.path.join(case_folder, file)
-                    break
-
-            if not approval_file:
-                QMessageBox.warning(self, "提示", "请先生成案件审批表")
+            # 获取审批表数据
+            approval_data = self._get_approval_data(case_data)
+            if not approval_data:
                 return
 
-            # 从审批表读取数据
-            from docx import Document
-            approval_doc = Document(approval_file)
-
-            申请时间 = ""
-            受理时间 = ""
-            综合情况 = ""
-            医疗结论 = ""
-
-            # 遍历表格查找数据
-            for table in approval_doc.tables:
-                for row in table.rows:
-                    for i, cell in enumerate(row.cells):
-                        text = cell.text
-                        if "申请时间" in text and i + 1 < len(row.cells):
-                            申请时间 = row.cells[i + 1].text.strip()
-                        elif "受理时间" in text and i + 1 < len(row.cells):
-                            受理时间 = row.cells[i + 1].text.strip()
-                        elif "受伤经过" in text and i + 1 < len(row.cells):
-                            综合情况 = row.cells[i + 1].text.strip()
-                        elif "医疗诊断" in text and i + 1 < len(row.cells):
-                            医疗结论 = row.cells[i + 1].text.strip()
-
-            # 格式化时间
-            if len(申请时间) == 8 and 申请时间.isdigit():
-                申请时间 = f"{申请时间[:4]}年{int(申请时间[4:6])}月{int(申请时间[6:])}日"
-            if len(受理时间) == 8 and 受理时间.isdigit():
-                受理时间 = f"{受理时间[:4]}年{int(受理时间[4:6])}月{int(受理时间[6:])}日"
-
-            if not 申请时间 or not 受理时间:
+            if not approval_data['申请时间'] or not approval_data['受理时间']:
                 QMessageBox.warning(self, "提示", "审批表中未找到申请时间或受理时间")
                 return
 
@@ -554,12 +541,12 @@ class MainWindow(QMainWindow):
             render_data = {
                 '用人单位': case_data.get('employer', ''),
                 '申请人': case_data.get('applicant', ''),
-                '申请时间': 申请时间,
-                '受理时间': 受理时间,
+                '申请时间': approval_data['申请时间'],
+                '受理时间': approval_data['受理时间'],
                 '本人姓名': case_data.get('person_name', ''),
                 '本人身份证': case_data.get('person_info', {}).get('id_card', ''),
-                '综合情况': 综合情况,
-                '医疗结论': 医疗结论,
+                '综合情况': approval_data['综合情况'],
+                '医疗结论': approval_data['医疗结论'],
                 '当前时期': datetime.now().strftime('%Y年%m月%d日'),
             }
 
@@ -568,7 +555,7 @@ class MainWindow(QMainWindow):
 
             # 保存文件
             filename = f"{self.current_case_number}_接受谈话通知书.docx"
-            filepath = os.path.join(case_folder, filename)
+            filepath = os.path.join(approval_data['case_folder'], filename)
             doc.save(filepath)
             os.startfile(filepath)
 
@@ -953,11 +940,9 @@ class MainWindow(QMainWindow):
 
         # ========== 检查是否已有案本 ==========
         import json
-        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+        index_data = self._read_case_index()
 
-        if os.path.exists(index_file):
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
+        if index_data.get('cases'):
 
             # 搜索同名案件
             same_person_cases = []
@@ -1413,31 +1398,21 @@ class MainWindow(QMainWindow):
         cases = []
 
         # 读取索引文件
-        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+        index_data = self._read_case_index()
 
-        if os.path.exists(index_file):
-            try:
-                import json
-                with open(index_file, 'r', encoding='utf-8') as f:
-                    index_data = json.load(f)
+        for case in index_data.get('cases', []):
+            if case['person_name'] == name:
+                # 检查身份证号（如果有）
+                case_id = case.get('id_card', '')
+                if id_card and case_id:
+                    if id_card == case_id:
+                        case['match_type'] = '身份证完全匹配'
+                    else:
+                        case['match_type'] = '姓名匹配(身份证不同)'
+                else:
+                    case['match_type'] = '姓名匹配'
 
-                for case in index_data.get('cases', []):
-                    if case['person_name'] == name:
-                        # 检查身份证号（如果有）
-                        case_id = case.get('id_card', '')
-                        if id_card and case_id:
-                            # 有身份证输入，进行比对
-                            if id_card == case_id:
-                                case['match_type'] = '身份证完全匹配'
-                            else:
-                                case['match_type'] = '姓名匹配(身份证不同)'
-                        else:
-                            case['match_type'] = '姓名匹配'
-
-                        cases.append(case)
-
-            except Exception as e:
-                print(f"读取索引文件失败: {e}")
+                cases.append(case)
 
         return cases
 
@@ -1445,32 +1420,75 @@ class MainWindow(QMainWindow):
         """根据人员类型和单位情况生成描述语句"""
         person_type = data['人员类型']
 
+        # 获取姓名
         if person_type == "本人":
             name = data.get('本人姓名', '')
         elif person_type == "证人":
             name = data.get('证人姓名', '')
-        else:
+        else:  # 法人
             name = data.get('法人姓名', '')
 
         employer = data.get('用人单位', '')
         work_unit = data.get('用工单位', '')
         workplace = data.get('工作场所', '')
-        position = data.get(f'{person_type}岗位', '')
+
+        # 获取受伤职工姓名
+        injured_name = data.get('受伤职工', '')
+
+        # 从索引文件获取本人岗位
+        injured_position = ""
+        if self.current_case_number:
+            import json
+            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+            if os.path.exists(index_file):
+                try:
+                    with open(index_file, 'r', encoding='utf-8') as f:
+                        index_data = json.load(f)
+                    for case in index_data.get('cases', []):
+                        if case['case_number'] == self.current_case_number:
+                            injured_position = case.get('person_info', {}).get('position', '')
+                            break
+                except:
+                    pass
 
         has_employer = bool(employer)
         has_work_unit = bool(work_unit)
         has_workplace = bool(workplace)
 
-        if has_employer and has_work_unit and has_workplace:
-            description = f"我是{name}，系{employer}的职工，被指派到{work_unit}的{workplace}工作。从事{position}工作。"
-        elif has_employer and has_work_unit:
-            description = f"我是{name}，系{employer}的职工，被指派到{work_unit}工作。从事{position}工作。"
-        elif has_employer and has_workplace:
-            description = f"我是{name}，系{employer}的职工，被指派到{workplace}工作。从事{position}工作。"
-        elif has_employer:
-            description = f"我是{name}，系{employer}的职工。从事{position}工作。"
-        else:
-            description = f"我是{name}。从事{position}工作。"
+        # 法人特殊处理
+        if person_type == "法人":
+            # 第一部分：法人自身介绍
+            if has_employer:
+                description = f"我是{name}，是{employer}的法定代表人，负责公司全面管理工作。"
+            else:
+                description = f"我是{name}，是法定代表人，负责公司全面管理工作。"
+
+            # 第二部分：介绍受伤职工
+            if injured_name:
+                if has_work_unit and has_workplace:
+                    description += f"{injured_name}是我公司指派到{work_unit}承建的{workplace}工作的员工，从事{injured_position}工作。"
+                elif has_work_unit:
+                    description += f"{injured_name}是我公司指派到{work_unit}工作的员工，从事{injured_position}工作。"
+                elif has_workplace:
+                    description += f"{injured_name}是我公司指派到{workplace}工作的员工，从事{injured_position}工作。"
+                else:
+                    description += f"{injured_name}是我公司的员工，从事{injured_position}工作。"
+
+            return description
+
+        # 本人和证人的原有逻辑
+        if person_type in ["本人", "证人"]:
+            position = data.get(f'{person_type}岗位', '')
+            if has_employer and has_work_unit and has_workplace:
+                description = f"我是{name}，系{employer}的职工，被指派到{work_unit}的{workplace}工作。从事{position}工作。"
+            elif has_employer and has_work_unit:
+                description = f"我是{name}，系{employer}的职工，被指派到{work_unit}工作。从事{position}工作。"
+            elif has_employer and has_workplace:
+                description = f"我是{name}，系{employer}的职工，被指派到{workplace}工作。从事{position}工作。"
+            elif has_employer:
+                description = f"我是{name}，系{employer}的职工。从事{position}工作。"
+            else:
+                description = f"我是{name}。从事{position}工作。"
 
         return description
 
@@ -1618,17 +1636,36 @@ class MainWindow(QMainWindow):
 
         applicant = self.lineEdit_applicant.text().strip()
 
-        # 获取受伤职工（从本人姓名获取）
-        injured_worker = self.lineEdit_name.text().strip()  # ✅ 改为从本人姓名获取
+        # 修复：受伤职工应该从当前案本获取，而不是从输入框
+        # 如果有当前案本号，从索引文件获取本人姓名
+        injured_worker = ""
+        if self.current_case_number:
+            # 从索引文件读取本人姓名
+            index_file = os.path.join(self.BASE_DIR, "cases_index.json")
+            if os.path.exists(index_file):
+                try:
+                    import json
+                    with open(index_file, 'r', encoding='utf-8') as f:
+                        index_data = json.load(f)
+                    for case in index_data.get('cases', []):
+                        if case['case_number'] == self.current_case_number:
+                            injured_worker = case.get('person_name', '')
+                            break
+                except:
+                    pass
+
+        # 如果没有当前案本（新建本人案件时），才从输入框获取
+        if not injured_worker and prefix == "本人":
+            injured_worker = self.lineEdit_name.text().strip()
 
         # 个人死亡案件检查
         if self.check_case_type() == "个人申请死亡案件" and self.radio_self.isChecked():
             if not applicant:
-                return None  # 返回None表示数据不完整
+                return None
 
         data = {
             '案本号': '',
-            '受伤职工': injured_worker,  # 从本人姓名获取
+            '受伤职工': injured_worker,  # 现在始终是本人姓名
             '申请人': applicant,
             '用人单位': employer,
             '用工单位': work_unit,
@@ -1677,9 +1714,9 @@ class MainWindow(QMainWindow):
 
             # 要搜索的关键词
             question_keywords = {
-                '受伤经过': ['什么工作原因', '事故发生', '具体经过'],
-                '就医情况': ['受伤后', '哪个医院', '是谁送你'],
-                '医疗结论': ['此次受伤', '医院对你', '医疗结论']
+                '受伤经过': ['什么工作原因', '事故发生', '具体经过', '详细描述', '日常接触'],
+                '就医情况': ['受伤后', '哪个医院', '是谁送你', '何处就诊', '哪些症状'],
+                '医疗结论': ['此次受伤', '医院对你', '医疗结论', '诊断结论', '医院最终']
             }
 
             extracted_info = {}
@@ -1718,12 +1755,11 @@ class MainWindow(QMainWindow):
 
     def update_extracted_info_in_index(self, case_number, extracted_info):
         """只更新受伤经过、就医情况、医疗结论三个字段"""
-        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-
         try:
             import json
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
+
+            # 读取现有索引
+            index_data = self._read_case_index()
 
             for case in index_data.get('cases', []):
                 if case['case_number'] == case_number:
@@ -1733,79 +1769,20 @@ class MainWindow(QMainWindow):
                         case['person_info']['医疗结论'] = extracted_info.get('医疗结论', '')
                     break
 
-            with open(index_file, 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, ensure_ascii=False, indent=2)
+            # 写入文件
+            self._write_case_index(index_data)
 
         except Exception as e:
             print(f"更新提取信息失败: {e}")
 
-    def update_person_info_in_index(self, case_number, extracted_info):
-        """在索引文件中更新本人的额外信息"""
-        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-
-        try:
-            import json
-
-            if not os.path.exists(index_file):
-                self.statusBar().showMessage("索引文件不存在", 3000)
-                return
-
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
-
-            # 查找对应的案本
-            updated = False
-            for case in index_data.get('cases', []):
-                if case['case_number'] == case_number:
-                    # 确保person_info存在
-                    if 'person_info' not in case:
-                        case['person_info'] = {}
-
-                    # 添加提取的信息
-                    case['person_info']['受伤经过'] = extracted_info.get('受伤经过', '')
-                    case['person_info']['就医情况'] = extracted_info.get('就医情况', '')
-                    case['person_info']['医疗结论'] = extracted_info.get('医疗结论', '')
-
-                    updated = True
-                    break
-
-            if updated:
-                # 保存更新后的索引
-                with open(index_file, 'w', encoding='utf-8') as f:
-                    json.dump(index_data, f, ensure_ascii=False, indent=2)
-                print(f"已更新案本 {case_number} 的本人信息")
-            else:
-                print(f"未找到案本 {case_number}")
-
-        except Exception as e:
-            print(f"更新索引失败: {e}")
-
-    def add_questions_to_doc(self, doc, data):
-        """将案件类型问答句添加到文档中"""
-        case_type = data['案件类型']
-        if case_type != "普通案件":
-            questions = self.generate_case_questions(case_type, data)
-            if questions:
-                doc.add_paragraph()  # 空行
-                for q in questions:
-                    doc.add_paragraph(q)
-        return doc
-
     def update_case_index(self, case_number, person_name, data):
         """更新案件索引文件（合并数据，避免覆盖）"""
-        index_file = os.path.join(self.BASE_DIR, "cases_index.json")
-
         try:
             import json
-            import shutil
             from datetime import datetime
 
             # 读取现有索引
-            if os.path.exists(index_file):
-                with open(index_file, 'r', encoding='utf-8') as f:
-                    index_data = json.load(f)
-            else:
-                index_data = {'cases': [], 'total_cases': 0, 'last_update': ''}
+            index_data = self._read_case_index()
 
             # 查找现有案件
             found = False
@@ -1830,11 +1807,11 @@ class MainWindow(QMainWindow):
                         '医疗结论': data.get('医疗结论', existing_person_info.get('医疗结论', ''))
                     }
 
-                    # 构建完整的案件数据（保留所有现有字段）
+                    # 构建完整的案件数据
                     index_data['cases'][i] = {
                         'case_number': case_number,
                         'person_name': person_name,
-                        'applicant': data.get('申请人', ''),  # 新增
+                        'applicant': data.get('申请人', ''),
                         'case_type': data.get('案件类型', existing_case.get('case_type', '')),
                         'year': datetime.now().year,
                         'folder_path': existing_case.get('folder_path', f"{datetime.now().year}/{case_number}"),
@@ -1845,18 +1822,18 @@ class MainWindow(QMainWindow):
                         'regulation': data.get('条例', existing_case.get('regulation', '')),
                         'operator': data.get('操作员', existing_case.get('operator', '')),
                         'person_info': new_person_info,
-                        'witnesses': existing_case.get('witnesses', []),  # 保留现有证人
-                        'legal_persons': existing_case.get('legal_persons', [])  # 保留现有法人
+                        'witnesses': existing_case.get('witnesses', []),
+                        'legal_persons': existing_case.get('legal_persons', [])
                     }
                     found = True
                     break
 
             if not found:
-                # 新建案件（没有现有数据）
+                # 新建案件
                 case_data = {
                     'case_number': case_number,
                     'person_name': person_name,
-                    'applicant': data.get('申请人', ''),  # 新增
+                    'applicant': data.get('申请人', ''),
                     'case_type': data.get('案件类型', ''),
                     'year': datetime.now().year,
                     'folder_path': f"{datetime.now().year}/{case_number}",
@@ -1889,13 +1866,10 @@ class MainWindow(QMainWindow):
             index_data['total_cases'] = len(index_data['cases'])
             index_data['last_update'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # 先写临时文件，再替换（防止文件损坏）
-            temp_file = index_file + ".tmp"
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, ensure_ascii=False, indent=2)
-
-            # 替换原文件
-            shutil.move(temp_file, index_file)
+            # 写入文件 - 只调用一次！
+            success = self._write_case_index(index_data)
+            if not success:
+                print("警告：索引文件写入失败")
 
         except Exception as e:
             print(f"更新索引失败: {e}")
@@ -1963,27 +1937,27 @@ class MainWindow(QMainWindow):
 
         event.accept()
 
-    def insert_description_into_doc(self, doc, data):
-        """
-        将自我介绍插入到文档中（使用占位符替换）
-        不再依赖特定问题文本，而是直接替换 {自我介绍} 占位符
-        """
-        description = self.generate_description(data)
-
-        # 遍历所有段落，替换 {自我介绍} 占位符
-        for paragraph in doc.paragraphs:
-            if "{自我介绍}" in paragraph.text:
-                paragraph.text = paragraph.text.replace("{自我介绍}", description)
-
-        # 也检查表格中的单元格
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        if "{自我介绍}" in paragraph.text:
-                            paragraph.text = paragraph.text.replace("{自我介绍}", description)
-
-        return doc
+    # def insert_description_into_doc(self, doc, data):
+    #     """
+    #     将自我介绍插入到文档中（使用占位符替换）
+    #     不再依赖特定问题文本，而是直接替换 {自我介绍} 占位符
+    #     """
+    #     description = self.generate_description(data)
+    #
+    #     # 遍历所有段落，替换 {自我介绍} 占位符
+    #     for paragraph in doc.paragraphs:
+    #         if "{自我介绍}" in paragraph.text:
+    #             paragraph.text = paragraph.text.replace("{自我介绍}", description)
+    #
+    #     # 也检查表格中的单元格
+    #     for table in doc.tables:
+    #         for row in table.rows:
+    #             for cell in row.cells:
+    #                 for paragraph in cell.paragraphs:
+    #                     if "{自我介绍}" in paragraph.text:
+    #                         paragraph.text = paragraph.text.replace("{自我介绍}", description)
+    #
+    #     return doc
 
     # 以下是测试程序，编程完成以后需要删除
     def keyPressEvent(self, event):
