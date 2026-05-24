@@ -1,57 +1,103 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-安全配置管理器 - 使用QSettings
+安全配置管理器 - 使用 QSettings + Windows DPAPI 加密
 """
-
-import base64
+import ctypes
+from ctypes import wintypes
 from PyQt5.QtCore import QSettings
+
+SERVICE_NAME = "WorkInjuryApp"
 
 
 class ConfigManager:
-    """配置管理器 - 最简单实现"""
+    """配置管理器 — API Key 使用 Windows DPAPI 加密存储"""
 
     def __init__(self):
-        # QSettings会自动处理不同系统的存储
         self.settings = QSettings("WorkInjuryApp", "Config")
 
+    @staticmethod
+    def _encrypt(plain_text):
+        """使用 Windows DPAPI 加密字符串"""
+        data_in = plain_text.encode('utf-16le')
+        blob_in = ctypes.create_string_buffer(data_in, len(data_in))
+
+        data_in_struct = ctypes.c_buffer(data_in)
+        blob_in_struct = ctypes.c_buffer(blob_in.raw)
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [
+                ("cbData", wintypes.DWORD),
+                ("pbData", ctypes.POINTER(ctypes.c_char)),
+            ]
+
+        data_in_blob = DATA_BLOB(len(data_in), ctypes.cast(data_in_struct, ctypes.POINTER(ctypes.c_char)))
+        data_out_blob = DATA_BLOB()
+
+        if not ctypes.windll.crypt32.CryptProtectData(
+            ctypes.byref(data_in_blob),
+            SERVICE_NAME,
+            None, None, None,
+            0,  # CRYPTPROTECT_UI_FORBIDDEN
+            ctypes.byref(data_out_blob),
+        ):
+            return ""
+
+        encrypted = ctypes.string_at(data_out_blob.pbData, data_out_blob.cbData)
+        ctypes.windll.kernel32.LocalFree(data_out_blob.pbData)
+        return encrypted.hex()
+
+    @staticmethod
+    def _decrypt(hex_data):
+        """使用 Windows DPAPI 解密字符串"""
+        if not hex_data:
+            return ""
+        encrypted = bytes.fromhex(hex_data)
+
+        data_in_struct = ctypes.c_buffer(encrypted)
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [
+                ("cbData", wintypes.DWORD),
+                ("pbData", ctypes.POINTER(ctypes.c_char)),
+            ]
+
+        data_in_blob = DATA_BLOB(len(encrypted), ctypes.cast(data_in_struct, ctypes.POINTER(ctypes.c_char)))
+        data_out_blob = DATA_BLOB()
+
+        if not ctypes.windll.crypt32.CryptUnprotectData(
+            ctypes.byref(data_in_blob),
+            None, None, None, None,
+            0,
+            ctypes.byref(data_out_blob),
+        ):
+            return ""
+
+        decrypted = ctypes.string_at(data_out_blob.pbData, data_out_blob.cbData)
+        ctypes.windll.kernel32.LocalFree(data_out_blob.pbData)
+        return decrypted.decode('utf-16le', errors='ignore')
+
     def save_config(self, operator="", api_url="", api_key="", remember=False):
-        """
-        保存配置
-        """
-        # 保存基础配置
         self.settings.setValue("operator", operator)
         self.settings.setValue("api_url", api_url)
         self.settings.setValue("remember", remember)
 
-        # API密钥简单编码后保存
         if api_key and remember:
-            encoded = base64.b64encode(api_key.encode()).decode()
-            self.settings.setValue("api_key_encoded", encoded)
+            encrypted = self._encrypt(api_key)
+            self.settings.setValue("api_key_dpapi", encrypted)
         else:
-            self.settings.remove("api_key_encoded")
+            self.settings.remove("api_key_dpapi")
 
     def load_config(self):
-        """
-        加载配置
-        返回: dict {operator, api_url, api_key, remember}
-        """
-        # 检查是否记住
         remember = self.settings.value("remember", False, type=bool)
-
-        # 加载基础配置
         operator = self.settings.value("operator", "", type=str)
         api_url = self.settings.value("api_url", "", type=str)
 
-        # 加载API密钥
         api_key = ""
         if remember:
-            encoded = self.settings.value("api_key_encoded", "", type=str)
-            if encoded:
-                try:
-                    api_key = base64.b64decode(encoded.encode()).decode()
-                except:
-                    api_key = ""
+            encrypted = self.settings.value("api_key_dpapi", "", type=str)
+            if encrypted:
+                api_key = self._decrypt(encrypted)
 
         return {
             "operator": operator,
@@ -61,8 +107,7 @@ class ConfigManager:
         }
 
     def clear_config(self):
-        """清除所有配置"""
         self.settings.remove("operator")
         self.settings.remove("api_url")
-        self.settings.remove("api_key_encoded")
+        self.settings.remove("api_key_dpapi")
         self.settings.setValue("remember", False)

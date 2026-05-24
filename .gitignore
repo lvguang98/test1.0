@@ -58,6 +58,10 @@ config.json
 secrets.json
 *.env
 
+# 运行时数据
+cases_index.json
+20*/
+
 # Word临时文件
 ~$*.docx
 ~$*.doc

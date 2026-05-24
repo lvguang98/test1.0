@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>MainWindow</class>
- <widget class="QMainWindow" name="MainWindow">
+ <class>mainWindow</class>
+ <widget class="QMainWindow" name="mainWindow">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -272,7 +272,7 @@
       <rect>
        <x>120</x>
        <y>150</y>
-       <width>281</width>
+       <width>221</width>
        <height>20</height>
       </rect>
      </property>
@@ -605,6 +605,19 @@
      </property>
      <property name="text">
       <string>当前案本：无</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btn_read_id_card">
+     <property name="geometry">
+      <rect>
+       <x>360</x>
+       <y>150</y>
+       <width>151</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>读取身份证</string>
      </property>
     </widget>
    </widget>
