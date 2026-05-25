@@ -499,7 +499,7 @@ class MainWindow(QMainWindow):
             self.extract_approval_times(approval_doc, case_data)
 
         self._generate_document(
-            template_name="工伤案件审批表模板.docx",
+            template_name="工伤案件审批表（模板）.docx",
             filename=f"{self.current_case_number}_案件审批表.docx",
             build_render_data=build_data,
             post_process=post_process
@@ -613,7 +613,7 @@ class MainWindow(QMainWindow):
             }
 
         self._generate_document(
-            template_name="工伤认定告知书模板.docx",
+            template_name="工伤认定告知书（模板）.docx",
             filename=f"{self.current_case_number}_工伤认定告知书.docx",
             build_render_data=build_data,
             require_approval=True
@@ -635,7 +635,7 @@ class MainWindow(QMainWindow):
             }
 
         self._generate_document(
-            template_name="接受谈话通知书模板.docx",
+            template_name="接受谈话通知书（模板）.docx",
             filename=f"{self.current_case_number}_接受谈话通知书.docx",
             build_render_data=build_data,
             require_approval=True
@@ -974,11 +974,24 @@ class MainWindow(QMainWindow):
                     self.label_current_case.setText(f"当前案本：{self.current_case_number}")
 
                     person_info = selected_case.get('person_info', {})
+                    # 本人信息
                     self.lineEdit_name.setText(person_info.get('name', ''))
-                    self.lineEdit_id_card.setText(selected_case.get('id_card', ''))
-                    self.lineEdit_phone.setText(person_info.get('phone', ''))
-                    if selected_case.get('id_card'):
+                    self.lineEdit_id_card.setText(person_info.get('id_card', ''))
+                    if person_info.get('id_card'):
                         self.auto_calculate_id_info()
+                    self.comboBox_gender.setCurrentText(person_info.get('gender', ''))
+                    self.lineEdit_age.setText(person_info.get('age', ''))
+                    self.lineEdit_id_address.setText(person_info.get('address', ''))
+                    self.lineEdit_current_address.setText(person_info.get('current_address', ''))
+                    self.lineEdit_phone.setText(person_info.get('phone', ''))
+                    self.lineEdit_position.setText(person_info.get('position', ''))
+                    # 案件信息
+                    self.lineEdit_applicant.setText(selected_case.get('applicant', ''))
+                    self.comboBox_employer.setEditText(selected_case.get('employer', ''))
+                    self.comboBox_work_unit.setEditText(selected_case.get('work_unit', ''))
+                    self.comboBox_workplace.setEditText(selected_case.get('workplace', ''))
+                    self.comboBox_regulations.setCurrentText(selected_case.get('regulation', ''))
+                    self.lineEdit_operator.setText(selected_case.get('operator', ''))
 
                     self.statusBar().showMessage(f"已关联案本: {selected_case['case_number']}", 3000)
 
@@ -1655,21 +1668,24 @@ class MainWindow(QMainWindow):
                     # 获取现有的 person_info
                     existing_person_info = existing_case.get('person_info', {})
 
-                    # 构建新的 person_info保留旧数据，用新数据覆盖
-                    new_person_info = {
-                        'name': data.get('本人姓名', existing_person_info.get('name', '')),
-                        'gender': data.get('本人性别', existing_person_info.get('gender', '')),
-                        'age': data.get('本人年龄', existing_person_info.get('age', '')),
-                        'phone': data.get('本人电话', existing_person_info.get('phone', '')),
-                        'id_card': data.get('本人身份证号', existing_person_info.get('id_card', '')),
-                        'address': data.get('本人身份证地址', existing_person_info.get('address', '')),
-                        'current_address': data.get('本人现住址', existing_person_info.get('current_address', '')),
-                        'position': data.get('本人岗位', existing_person_info.get('position', '')),
-                        '自我介绍': data.get('自我介绍', existing_person_info.get('自我介绍', '')),
-                        '受伤经过': data.get('受伤经过', existing_person_info.get('受伤经过', '')),
-                        '就医情况': data.get('就医情况', existing_person_info.get('就医情况', '')),
-                        '医疗结论': data.get('医疗结论', existing_person_info.get('医疗结论', ''))
-                    }
+                    # 构建新的 person_info — 只有本人才更新自我介绍等字段，避免证人/法人数据覆盖
+                    if data.get('人员类型') == self.PERSON_SELF:
+                        new_person_info = {
+                            'name': data.get('本人姓名', existing_person_info.get('name', '')),
+                            'gender': data.get('本人性别', existing_person_info.get('gender', '')),
+                            'age': data.get('本人年龄', existing_person_info.get('age', '')),
+                            'phone': data.get('本人电话', existing_person_info.get('phone', '')),
+                            'id_card': data.get('本人身份证号', existing_person_info.get('id_card', '')),
+                            'address': data.get('本人身份证地址', existing_person_info.get('address', '')),
+                            'current_address': data.get('本人现住址', existing_person_info.get('current_address', '')),
+                            'position': data.get('本人岗位', existing_person_info.get('position', '')),
+                            '自我介绍': data.get('自我介绍', existing_person_info.get('自我介绍', '')),
+                            '受伤经过': data.get('受伤经过', existing_person_info.get('受伤经过', '')),
+                            '就医情况': data.get('就医情况', existing_person_info.get('就医情况', '')),
+                            '医疗结论': data.get('医疗结论', existing_person_info.get('医疗结论', ''))
+                        }
+                    else:
+                        new_person_info = existing_person_info
 
                     # 构建完整的案件数据
                     index_data['cases'][i] = {
@@ -1680,11 +1696,11 @@ class MainWindow(QMainWindow):
                         'year': datetime.now().year,
                         'folder_path': existing_case.get('folder_path', f"{datetime.now().year}/{case_number}"),
                         'created_date': existing_case.get('created_date', datetime.now().strftime('%Y-%m-%d')),
-                        'employer': data.get('用人单位', existing_case.get('employer', '')),
-                        'work_unit': data.get('用工单位', existing_case.get('work_unit', '')),
-                        'workplace': data.get('工作场所', existing_case.get('workplace', '')),
-                        'regulation': data.get('条例', existing_case.get('regulation', '')),
-                        'operator': data.get('操作员', existing_case.get('operator', '')),
+                        'employer': data.get('用人单位') or existing_case.get('employer', ''),
+                        'work_unit': data.get('用工单位') or existing_case.get('work_unit', ''),
+                        'workplace': data.get('工作场所') or existing_case.get('workplace', ''),
+                        'regulation': data.get('条例') or existing_case.get('regulation', ''),
+                        'operator': data.get('操作员') or existing_case.get('operator', ''),
                         'person_info': new_person_info,
                         'witnesses': existing_case.get('witnesses', []),
                         'legal_persons': existing_case.get('legal_persons', [])
